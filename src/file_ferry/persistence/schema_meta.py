@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import sqlite3
 
+from file_ferry.legacy_schema import RUNNER_VERSION_KEY
+
 SCHEMA_META_DDL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
     key   TEXT PRIMARY KEY,
@@ -20,7 +22,7 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 )
 """
 
-CURRENT_VERSION_KEY = "schema_version"
+CURRENT_VERSION_KEY = RUNNER_VERSION_KEY
 
 
 def ensure_schema_meta(conn: sqlite3.Connection) -> None:

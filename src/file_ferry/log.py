@@ -19,6 +19,13 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from file_ferry.legacy_schema import (
+    LEGACY_PROJECTS_TABLE,
+    LEGACY_VERSION_KEY,
+    RUNNER_VERSION_KEY,
+    rename_legacy_projects_table,
+    runner_has_migrated,
+)
 from file_ferry.models import (
     FileRecord,
     OrganizeOpRecord,
@@ -31,6 +38,10 @@ from file_ferry.models import (
     VerificationSnapshotRecord,
 )
 
+# The legacy log's own counter. It is stamped under its own key
+# (``legacy_schema_version``) because ``schema_meta.schema_version``
+# belongs to the numbered migration runner — see ADR-0003 and
+# ``file_ferry.legacy_schema``.
 SCHEMA_VERSION = 7
 
 SCHEMA_SQL = """
@@ -96,7 +107,9 @@ CREATE TABLE IF NOT EXISTS proxies (
     generated_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS projects (
+-- The legacy Resolve project table. Named per ADR-0003 so the name
+-- ``projects`` belongs to the vNext entity (migration 002).
+CREATE TABLE IF NOT EXISTS legacy_resolve_projects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     path TEXT NOT NULL,
@@ -160,7 +173,7 @@ CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
 CREATE INDEX IF NOT EXISTS idx_probes_file_id ON probes(file_id);
 CREATE INDEX IF NOT EXISTS idx_probes_run_id ON probes(run_id);
 CREATE INDEX IF NOT EXISTS idx_proxies_run_id ON proxies(run_id);
-CREATE INDEX IF NOT EXISTS idx_projects_run_id ON projects(run_id);
+CREATE INDEX IF NOT EXISTS idx_legacy_resolve_projects_run_id ON legacy_resolve_projects(run_id);
 CREATE INDEX IF NOT EXISTS idx_verifications_run_id ON verifications(run_id);
 CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at);
 CREATE INDEX IF NOT EXISTS idx_organize_ops_run_id ON organize_ops(run_id);
@@ -216,11 +229,27 @@ class LogStore:
         """Create the database file and migrate it to the current schema."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
+            # Adopt a pre-existing legacy ``projects`` table before the
+            # DDL runs: the rename is what frees the name for the vNext
+            # entity, and the DDL below creates the table under its
+            # ADR-0003 name. Only do this when the numbered migration
+            # runner has never been here — if it has, it owns the rename
+            # as part of migration 001 and will notice the table itself.
+            adopted = False
+            if not runner_has_migrated(conn):
+                adopted = rename_legacy_projects_table(conn)
             conn.executescript(SCHEMA_SQL)
             self._migrate(conn)
+            if adopted:
+                # The runner has never migrated this database, so any
+                # ``schema_version`` in schema_meta was written by the
+                # legacy log's own counter. It is not the runner's key —
+                # remove it rather than leave a version the runner never
+                # wrote (and would refuse to run against).
+                conn.execute("DELETE FROM schema_meta WHERE key = ?", (RUNNER_VERSION_KEY,))
             conn.execute(
                 "INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)",
-                ("schema_version", str(SCHEMA_VERSION)),
+                (LEGACY_VERSION_KEY, str(SCHEMA_VERSION)),
             )
 
     @staticmethod
@@ -250,9 +279,11 @@ class LogStore:
         # Version 6 introduced projects.manifest_path.
         # When Resolve is unavailable, the actual artifact is the manifest path,
         # not the requested .drp path. Keeping both fields makes the audit honest.
-        proj_columns = {row["name"] for row in conn.execute("PRAGMA table_info(projects)")}
-        if "manifest_path" not in proj_columns:
-            conn.execute("ALTER TABLE projects ADD COLUMN manifest_path TEXT")
+        proj_columns = {
+            row["name"] for row in conn.execute(f"PRAGMA table_info({LEGACY_PROJECTS_TABLE})")
+        }
+        if proj_columns and "manifest_path" not in proj_columns:
+            conn.execute(f"ALTER TABLE {LEGACY_PROJECTS_TABLE} ADD COLUMN manifest_path TEXT")
 
         # Version 7 brought probes in line with the full MediaProbe surface
         # (issue #42). Nine fields were captured at probe time but never
@@ -442,7 +473,7 @@ class LogStore:
         """Insert a project row; return its id."""
         with self._connect() as conn:
             cur = conn.execute(
-                "INSERT INTO projects (name, path, manifest_path, run_id, resolution, frame_rate, "
+                "INSERT INTO legacy_resolve_projects (name, path, manifest_path, run_id, resolution, frame_rate, "
                 "color_space, bin_count, timeline_count, resolve_version, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (

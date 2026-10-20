@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from file_ferry.legacy_schema import LEGACY_VERSION_KEY
 from file_ferry.log import SCHEMA_VERSION, LogStore
 from file_ferry.models import (
     OrganizeOpRecord,
@@ -36,10 +37,20 @@ class TestSchema:
 
         with sqlite3.connect(store.db_path) as conn:
             row = conn.execute(
-                "SELECT value FROM schema_meta WHERE key = 'schema_version'"
+                "SELECT value FROM schema_meta WHERE key = ?", (LEGACY_VERSION_KEY,)
             ).fetchone()
             assert row is not None
             assert row[0] == str(SCHEMA_VERSION)
+
+    def test_the_runners_version_key_is_left_alone(self, store: LogStore) -> None:
+        """``schema_meta.schema_version`` belongs to the migration runner."""
+        import sqlite3
+
+        with sqlite3.connect(store.db_path) as conn:
+            row = conn.execute(
+                "SELECT value FROM schema_meta WHERE key = 'schema_version'"
+            ).fetchone()
+            assert row is None
 
     def test_initialize_is_idempotent(self, tmp_path) -> None:
         s = LogStore(tmp_path / "ferry.db")
