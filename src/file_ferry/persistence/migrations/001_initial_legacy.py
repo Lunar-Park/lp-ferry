@@ -12,12 +12,22 @@ rename: the legacy ``projects`` table is renamed to
 per ADR-0003. The legacy CLI / TUI read it through the legacy
 view.
 
-See ADR-0003 (application persistence model).
+The rename also has to be applied to a database that already has the
+legacy table under the old name — a database the legacy audit log
+created before this migration ran. Without that step the legacy
+``projects`` table kept the name, migration 002's ``CREATE TABLE IF
+NOT EXISTS projects`` became a no-op, and the vNext entity was never
+created. See ADR-0003 (application persistence model).
 """
 
 from __future__ import annotations
 
 import sqlite3
+
+from file_ferry.legacy_schema import (
+    LEGACY_PROJECTS_TABLE,
+    rename_legacy_projects_table,
+)
 
 # Verbatim copy of the v0.2.4 SCHEMA_SQL, with the legacy `projects`
 # table renamed to avoid collision with the vNext entity.
@@ -157,7 +167,17 @@ VERSION = 1
 
 def upgrade(conn: sqlite3.Connection) -> None:
     """Apply the legacy v0.2.4 schema. Idempotent."""
+    # A database the legacy audit log created carries the legacy table
+    # under the old name ``projects``. Adopt it before the DDL runs so
+    # the name is free for the vNext entity in migration 002.
+    rename_legacy_projects_table(conn)
     conn.executescript(SCHEMA_SQL)
+    # The legacy log adds ``manifest_path`` as an additive migration of
+    # its own; a table it created before migration 001 ran will not
+    # have it. The DDL above only applies to a table it creates.
+    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({LEGACY_PROJECTS_TABLE})")}
+    if columns and "manifest_path" not in columns:
+        conn.execute(f"ALTER TABLE {LEGACY_PROJECTS_TABLE} ADD COLUMN manifest_path TEXT")
 
 
 def downgrade(conn: sqlite3.Connection) -> None:

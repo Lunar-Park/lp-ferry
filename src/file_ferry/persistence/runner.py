@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from file_ferry.legacy_schema import is_legacy_projects_table
 from file_ferry.persistence import backup
 from file_ferry.persistence.connection import database_exists, open_connection
 from file_ferry.persistence.schema_meta import (
@@ -183,7 +184,7 @@ def apply_pending(
     try:
         try:
             ensure_schema_meta(conn)
-            current = current_version(conn)
+            current = _recorded_version(conn)
         except sqlite3.OperationalError as exc:
             raise RuntimeError(f"database is locked: {db_path}") from exc
 
@@ -208,6 +209,31 @@ def apply_pending(
         return _upgrade(conn, db_path, pending, current, backups_dir)
     finally:
         conn.close()
+
+
+def _recorded_version(conn: sqlite3.Connection) -> int:
+    """Return the schema version this database is actually at.
+
+    ``schema_meta.schema_version`` is the runner's key, but the legacy
+    audit log used to stamp the same key with its own counter — a
+    counter that shares the runner's number space, so its values are
+    indistinguishable from the runner's by the number alone.
+
+    The database's shape settles it. The legacy log could only write
+    its stamp when the table ``projects`` had the legacy Resolve shape:
+    on a vNext-shaped ``projects`` table its ``CREATE INDEX ... ON
+    projects(run_id)`` fails, and the stamp is written after that
+    statement, so the stamp never lands. A legacy-shaped ``projects``
+    table is therefore proof that the stamp came from the legacy log,
+    and it also means migration 001 has not adopted the table yet.
+
+    In that case the recorded version is untrustworthy and the runner
+    replays the migrations from the start. They are idempotent, so the
+    replay is safe.
+    """
+    if is_legacy_projects_table(conn):
+        return 0
+    return current_version(conn)
 
 
 def _apply_loop(

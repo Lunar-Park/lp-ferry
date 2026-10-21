@@ -358,7 +358,7 @@ class TestCreateResolveProject:
         loaded = json.loads(manifest_path.read_text())
         assert loaded["name"] == "TestProject"
         # Project record was logged
-        assert _count_rows(store, "projects") == 1
+        assert _count_rows(store, "legacy_resolve_projects") == 1
 
     def test_resolve_available_creates_project(self, tmp_path: Path, store_dir: Path) -> None:
         source = tmp_path / "raw"

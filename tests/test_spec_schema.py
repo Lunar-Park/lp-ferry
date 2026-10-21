@@ -88,7 +88,7 @@ def test_spec_documents_every_table(
         "files",
         "probes",
         "proxies",
-        "projects",
+        "legacy_resolve_projects",
         "verifications",
         "organize_ops",
         "verification_snapshots",
@@ -113,6 +113,9 @@ def test_migration_only_columns_are_documented(
     show them (issue #43 missed projects.manifest_path for exactly this
     reason).
     """
-    for table, column in (("projects", "manifest_path"), ("probes", "is_vfr")):
+    for table, column in (
+        ("legacy_resolve_projects", "manifest_path"),
+        ("probes", "is_vfr"),
+    ):
         assert column in code_schema[table], f"{table}.{column} vanished from the code"
         assert column in spec_schema[table], f"{table}.{column} is missing from SPEC.md §7"

@@ -109,7 +109,7 @@ Compute fast checksums (xxhash by default; sha256 optional) of all files in a fo
 
 ### 5.6 SQLite audit log (the system of record)
 
-Every operation writes to a local SQLite database. Schema covers: runs, files, probes, proxies, projects, verifications, errors. Queryable via `ferry log` subcommand (e.g., `ferry log --since 1d --missing`).
+Every operation writes to a local SQLite database. Schema covers: runs, files, probes, proxies, legacy_resolve_projects, verifications, errors. Queryable via `ferry log` subcommand (e.g., `ferry log --since 1d --missing`).
 
 The default location is the platform application-data directory (`~/Library/Application Support/ferry/ferry.db` on macOS, `~/AppData/Local/ferry/ferry.db` on Windows, `~/.local/share/ferry/ferry.db` otherwise), resolved by `file_ferry.paths.default_db_path` so the CLI, the TUI, and the desktop sidecar all address **one** store. A pre-0.3.1 log at `~/.ferry/ferry.db` continues to be used when no application-data database exists. Override with `--db` or `FERRY_DB`.
 
@@ -163,16 +163,24 @@ for the current value.
 The code is the source of truth. This block is not hand-maintained
 against it: `tests/test_spec_schema.py` executes the SQL below into a
 scratch database and diffs it against a freshly initialized one, so any
-drift fails the suite. Note that a few columns (`projects.manifest_path`,
-the v7 `probes` fields) exist only in `_migrate`, not in `SCHEMA_SQL` —
+drift fails the suite. Note that a few columns
+(`legacy_resolve_projects.manifest_path`, the v7 `probes` fields)
+exist only in `_migrate`, not in `SCHEMA_SQL` —
 the sketch reflects the *effective* schema, which is what a fresh
 database actually gets. Column order is not compared, because
 `ALTER TABLE ADD COLUMN` appends while the sketch groups fields by
 meaning.
 
+The Resolve project table is named `legacy_resolve_projects` because
+the name `projects` belongs to the vNext project entity (ADR-0003,
+migration 002). `schema_meta` carries two version keys: `schema_version`
+is the numbered migration runner's, and `legacy_schema_version` is the
+audit log's own counter.
+
 ```sql
--- Schema version marker. `LogStore.initialize` writes SCHEMA_VERSION here
--- and `_migrate` reads it to decide which additive migrations to apply.
+-- Schema version marker. The numbered migration runner writes
+-- `schema_version` here; the legacy audit log writes its own counter
+-- under `legacy_schema_version`.
 CREATE TABLE schema_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -246,7 +254,7 @@ CREATE TABLE proxies (
 -- `path` is the requested .drp path (may not exist if Resolve was
 -- unavailable). `manifest_path` records what was actually written,
 -- so the audit log reflects ground truth.
-CREATE TABLE projects (
+CREATE TABLE legacy_resolve_projects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     path TEXT NOT NULL,
@@ -322,7 +330,7 @@ CREATE INDEX IF NOT EXISTS idx_files_path         ON files(path);
 CREATE INDEX IF NOT EXISTS idx_probes_file_id     ON probes(file_id);
 CREATE INDEX IF NOT EXISTS idx_probes_run_id      ON probes(run_id);
 CREATE INDEX IF NOT EXISTS idx_proxies_run_id     ON proxies(run_id);
-CREATE INDEX IF NOT EXISTS idx_projects_run_id    ON projects(run_id);
+CREATE INDEX IF NOT EXISTS idx_legacy_resolve_projects_run_id ON legacy_resolve_projects(run_id);
 CREATE INDEX IF NOT EXISTS idx_verifications_run_id ON verifications(run_id);
 CREATE INDEX IF NOT EXISTS idx_runs_started_at    ON runs(started_at);
 CREATE INDEX IF NOT EXISTS idx_organize_ops_run_id  ON organize_ops(run_id);
