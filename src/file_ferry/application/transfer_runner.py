@@ -541,7 +541,12 @@ class TransferRunner:
         ]
         reservable = [i.dest_rel_path for i in items if i.state == "pending"]
         with transaction(self._db_path) as conn:
-            conflicts = exec_repo.active_reservation_conflicts(conn, str(dest_root), reservable)
+            conflicts = exec_repo.active_reservation_conflicts(
+                conn,
+                str(dest_root),
+                reservable,
+                exclude_execution_id=execution.id,
+            )
             if conflicts:
                 return [
                     f"{rel} is reserved by transfer job {holder}; wait for that job "
