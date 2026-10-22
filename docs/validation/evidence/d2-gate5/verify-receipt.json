@@ -1,0 +1,112 @@
+[
+  {
+    "execution_id": "9f4ed4a8a16d4a679852f7c86a81ce8c",
+    "hash_matches": true,
+    "exported_path_present": true,
+    "ledger_entries": 182657,
+    "committed_entries": 181157,
+    "entries_with_matching_checksums": 181157,
+    "entries_missing_or_mismatched_checksums": 0,
+    "export_matches": true
+  },
+  {
+    "execution_id": "4d68819fa9394cb3a28c5f7de7948941",
+    "hash_matches": true,
+    "exported_path_present": true,
+    "ledger_entries": 185748,
+    "committed_entries": 184201,
+    "entries_with_matching_checksums": 184201,
+    "entries_missing_or_mismatched_checksums": 0,
+    "export_matches": true
+  },
+  {
+    "execution_id": "eb01fca699134934b3181f48e415653b",
+    "hash_matches": true,
+    "exported_path_present": true,
+    "ledger_entries": 199905,
+    "committed_entries": 199681,
+    "entries_with_matching_checksums": 199681,
+    "entries_missing_or_mismatched_checksums": 0,
+    "export_matches": true
+  },
+  {
+    "execution_id": "a958385ede7c42fba182e70294a0451d",
+    "hash_matches": true,
+    "exported_path_present": true,
+    "ledger_entries": 198995,
+    "committed_entries": 198758,
+    "entries_with_matching_checksums": 198758,
+    "entries_missing_or_mismatched_checksums": 0,
+    "export_matches": true
+  },
+  {
+    "execution_id": "ee4ac36a1fca46249d7eb2573beba48b",
+    "hash_matches": true,
+    "exported_path_present": true,
+    "ledger_entries": 194160,
+    "committed_entries": 194015,
+    "entries_with_matching_checksums": 194015,
+    "entries_missing_or_mismatched_checksums": 0,
+    "export_matches": true
+  },
+  {
+    "execution_id": "1282703e9fa843e7b0ff0171bf88216e",
+    "hash_matches": true,
+    "exported_path_present": true,
+    "ledger_entries": 159922,
+    "committed_entries": 159809,
+    "entries_with_matching_checksums": 159809,
+    "entries_missing_or_mismatched_checksums": 0,
+    "export_matches": true
+  },
+  {
+    "execution_id": "8056b0dfe4924ad588c792adb8f099c4",
+    "hash_matches": true,
+    "exported_path_present": true,
+    "ledger_entries": 167378,
+    "committed_entries": 145682,
+    "entries_with_matching_checksums": 145682,
+    "entries_missing_or_mismatched_checksums": 0,
+    "export_matches": true
+  },
+  {
+    "execution_id": "d97e3574d3b1477a911664389d764027",
+    "hash_matches": true,
+    "exported_path_present": true,
+    "ledger_entries": 182657,
+    "committed_entries": 181157,
+    "entries_with_matching_checksums": 181157,
+    "entries_missing_or_mismatched_checksums": 0,
+    "export_matches": true
+  },
+  {
+    "execution_id": "784e28c8750647bdb1219f8c56fd6a33",
+    "hash_matches": true,
+    "exported_path_present": true,
+    "ledger_entries": 109014,
+    "committed_entries": 109001,
+    "entries_with_matching_checksums": 109001,
+    "entries_missing_or_mismatched_checksums": 0,
+    "export_matches": true
+  },
+  {
+    "execution_id": "20c93fbae9ce44f6be4fdfdd61769f22",
+    "hash_matches": true,
+    "exported_path_present": true,
+    "ledger_entries": 179903,
+    "committed_entries": 178959,
+    "entries_with_matching_checksums": 178959,
+    "entries_missing_or_mismatched_checksums": 0,
+    "export_matches": true
+  },
+  {
+    "execution_id": "90ecaf809bcb4539b4cb6ae5082263cd",
+    "hash_matches": true,
+    "exported_path_present": true,
+    "ledger_entries": 181758,
+    "committed_entries": 181591,
+    "entries_with_matching_checksums": 181591,
+    "entries_missing_or_mismatched_checksums": 0,
+    "export_matches": true
+  }
+]

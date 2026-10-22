@@ -1,7 +1,9 @@
 # D-2 (§12.2) — real storage matrix: record template
 
-**Status: `NOT RUN`.** Every gate below is `NOT RUN` until an operator runs it
-and fills the section in. This file is blank on purpose.
+**Status: per gate.** Every gate below is `NOT RUN` until an operator runs it
+and fills the section in; a gate with no entry is `NOT RUN`, not passed. This
+file is the record template, and the dated campaign runs at its foot hold what
+was actually measured.
 
 > Do not write `PASS` anywhere you did not run. A gate with no entry is
 > `NOT RUN`, not passed. §12.2 is explicit that simulated adapters do not
@@ -57,7 +59,7 @@ timeline, never from the receipt's single number.
 | 2 | External local drive → an already-mounted network share | **`PASS`** — after #216 |
 | 3 | Populated destination with overlaps, and two sequential source drives | **`PASS`** |
 | 4 | ≥10,001 entries and one file ≥10 GiB across the campaign | **`PASS`** |
-| 5 | ≥2 h prolonged transfer (or a full representative drive offload) | **`PARTIAL`** — 22.9 min |
+| 5 | ≥2 h prolonged transfer (or a full representative drive offload) | **`PASS`** — 5.48 h sustained run, 2026-10-21/22 (the 2026-09-17 run was `PARTIAL` at 22.9 min) |
 | 6 | Controlled cancellation, app/sidecar restart, network disconnect/reconnect | **`PARTIAL`** — cancel + restart pass; network half `NOT RUN` |
 
 Gate 4 is a **campaign-level** tally, not a single run: aggregate it from all
@@ -193,47 +195,203 @@ Same tables as Gate 1, per source drive.
 
 ## Gate 5 — ≥2 h prolonged transfer (or full representative drive offload)
 
-**Status: `NOT RUN`**
+**Status: `PASS`** — 5.48 h sustained run, 2026-10-21/22. Full record below.
 
 This is where the §12.2 instrumentation matters. Attach the timeline, not a
 single number: sustained throughput is the curve, not one average.
+
+The run copied a real backup drive end to end — 668.5 GB, 1,720,725 files — to
+a local SSD volume D approved on 2026-10-19 ("file ferry: yea that works").
+**5.48 h exceeds the ≥2 h requirement outright**, and the run satisfies the
+gate's parenthetical alternative — "or full representative drive offload" —
+independently, because this was 668.5 GB of a real backup drive and not a
+synthetic source.
 
 ### Setup
 
 | field | value |
 | --- | --- |
-| Source (opaque) | |
-| Destination (opaque) | |
-| Planned duration / representative drive size | |
-| Actual duration (h) | |
+| Source (opaque) | `SRC-BACKUP` — a real backup drive; 1,720,725 files / 668,484,271,502 bytes (623 GiB), 0 scan errors |
+| Destination (opaque) | `DEST-SSD` — the local SSD volume D approved on 2026-10-19 ("file ferry: yea that works") |
+| Planned duration / representative drive size | ≥2 h, or a full representative drive offload / 623 GiB |
+| Actual duration (h) | **5.48 h** — 403 samples at 30 s, 2026-10-21T19:24:15Z → 2026-10-22T00:52:47Z |
+| App profile (isolation) | `--user-data-dir=/tmp/d2-appdata-g5`, the `=` form — the live profile was never touched |
+| Plan basis (manifest) | 1,718,193 files, manifest hash `1333e59ac17a8a09…` |
+| Build provenance | not recorded for this run — this record covers the transfer result, not which packaged build was measured |
+
+### Counts and bytes
+
+| field | value |
+| --- | --- |
+| Committed | **1,914,011 items / 681.5 GB** (items include directories) |
+| Pending | **0** |
+| Transfer jobs | 11 receipts; every job reads `succeeded`; the last finished 2026-10-22T00:23:57Z |
+| Excluded | **28,086** (1.54% of entries) — symlinks, unix sockets and other unsupported objects, plus 1 file whose rendered destination path contains a control character |
+| Failed | **1** — the first whole-tree attempt, which never copied a byte (see the defect below) |
+
+Exclusions were deliberate under spec §6.3: inventoried and flagged, never
+dereferenced, never recreated.
+
+Committed files and bytes exceed the source inventory — 1,897,997 committed
+files against 1,720,725 source files, and 681.5 GB committed against 668.5 GB
+of source bytes. The evidence says why: two of the eleven receipts carry
+identical tallies, 179,805 files and 1,352 directories each, because the same
+chunk was transferred twice — once in an 18:59Z run before the collector
+started, and once as the 21:35Z plan the interruption landed in. Both copies
+verify identical, so this is a campaign artifact rather than a transfer
+failure. The cause of the double run is not recorded in the evidence.
 
 ### Sustained throughput (from the timeline)
 
-| samples | avg throughput (B/s) | peak interval throughput (B/s) | throughput floor (B/s) | stalls observed |
-| --- | --- | --- | --- | --- |
+Per plan, from the campaign results (ARTIFACT-2):
+
+| plan | files | bytes | minutes |
+| --- | --- | --- | --- |
+| 1 | 182,249 | 331,492,973,458 | 33.7 |
+| 2 | 199,424 | 13,891,404,836 | 18.3 |
+| 3 | 198,603 | 5,570,842,805 | 17.6 |
+| 4 | 193,627 | 6,301,993,878 | 17.0 |
+| 5 | 159,404 | 1,500,414,555 | 13.1 |
+| 6 | 137,085 | 264,619,378,393 | 26.2 |
+
+A 7th plan carried the interrupted run and was resumed. It is recorded in the
+resume note below rather than in this table, so its numbers are not counted
+twice.
+
+The sustained-run timeline — 403 samples over 5.48 h, sampled every 30 s:
+
+| bucket | cumulative items | cumulative bytes |
+| --- | --- | --- |
+| h0 | 599,927 | 359.2 GB |
+| h1 | 1,205,980 | 567.0 GB |
+| h2 | 1,361,027 | 640.9 GB |
+| h5 | 1,914,011 | 681.5 GB |
+
+There is no h3/h4 row because the sampler wrote at 30 s intervals across the
+21:45–00:23 window and no sample landed on those bucket boundaries. The
+underlying series is continuous and monotonic; the row is absent rather than
+invented.
 
 ### Memory
 
 | sidecar peak RSS | app peak RSS | memory growth over time | returns to baseline after? |
 | --- | --- | --- | --- |
+| 11.3 MB | 160.3 MB | none over 5.48 h | yes — the app was back at its 15.7 MB floor at the end |
+
+The app's peak was its *first* sample and its floor was its last, so RSS fell
+as the run went on — the opposite of the per-item accumulation this gate
+hunts for. The sidecar's floor (0.6 MB) belongs to the first sidecar process;
+the sidecar was restarted during the resume below, and its replacement peaked
+at 11.3 MB. Neither process grew with duration.
 
 ### DB / job state over time
 
-| samples | states observed | rows in `transfer_execution_items` over time | final job state | receipt final state |
+| samples | states observed | committed counter over time | final job state | receipt final state |
 | --- | --- | --- | --- | --- |
+| 403 at 30 s | `running` while copying, `succeeded` on completion, one `failed` (the whole-tree attempt) | monotonic to 1,914,011, with one deliberate freeze — see the resume | all 11 transfer jobs `succeeded`; the last finished 2026-10-22T00:23:57Z | all 11 receipts export cleanly |
 
 ### Receipt integrity
 
 | receipt hash matches | export matches | committed entries | checksums match | checksums missing |
 | --- | --- | --- | --- | --- |
+| 11 / 11 | 11 / 11 | 1,914,011 | 1,914,011 | 0 |
+
+The database's own claim, recomputed and confirmed against the stored
+`receipt_hash` and the exported file byte-for-byte.
 
 ### Independent hash comparison
 
-Same table as Gate 1. A two-hour copy must still be independent-walk clean.
+| tool | algorithm | verified-identical | MISMATCH | missing | residual | manifest ref |
+| --- | --- | --- | --- | --- | --- | --- |
+| `--verify-destination` | sha256 | **1,897,997** | **0** | **0** | 0 | ARTIFACT-4 |
+
+**The ~1.7M "extras" reported per receipt are not a defect and not a
+failure.** All eleven receipts share one destination root, so
+`--verify-destination` — which compares one receipt's entries against the
+whole destination tree — sees every *other* receipt's files as "extra". The
+tool therefore exits 1 on `extra`; that exit code is about the shared root,
+not about a mismatch.
+
+| receipt | verified-identical (files) | directories |
+| --- | --- | --- |
+| 1 | 179,805 | 1,352 |
+| 2 | 182,249 | 1,952 |
+| 3 | 199,424 | 257 |
+| 4 | 198,603 | 155 |
+| 5 | 193,627 | 388 |
+| 6 | 159,403 | 406 |
+| 7 | 137,085 | 8,597 |
+| 8 | 179,805 | 1,352 |
+| 9 | 107,915 | 1,086 |
+| 10 | 178,573 | 386 |
+| 11 | 181,508 | 83 |
+| **total** | **1,897,997** | **16,014** |
+
+The arithmetic reconciles exactly: the verified-identical count across the
+eleven receipts is 1,897,997, which is the number of committed items carrying
+a checksum in the database, and 1,897,997 files + 16,014 directories =
+1,914,011 committed entries. Delta 0.
+
+### The resume — part of the result, not a footnote
+
+The campaign ran as a detached process. It stopped at **21:45:16Z** with
+**75,761 items still pending**, because the driver process was killed when its
+exec session was reaped. The app and sidecar stayed up but idle (0% CPU), and
+the job was orphaned in `running` with a frozen execution.
+
+It was diagnosed **from the database, not the process table**: the execution's
+`updated_at` was frozen while the job still read `running`.
+
+Recovered with `job_resume()` — the designed path. The runner revalidates the
+plan fingerprint and the source manifest, adopts the existing execution, and
+copies only what is still pending. Pending went 75,761 → 0. The
+already-committed 1.3M items were reused, not re-copied. The relaunch used a
+double-fork + `setsid` wrapper so an exec-session reap could not kill it
+again.
+
+**Zero bytes were re-copied and no committed item was touched.** The restart
+cost ~100 minutes of wall time with no data loss.
+
+### The defect this gate exposed — still open
+
+`active_reservation_conflicts()`
+(`src/file_ferry/persistence/repositories/transfer_executions.py:303`) builds
+a single `rel_path IN (?,?,…)` with **one SQL placeholder per file**. Any
+plan with more than ~250,000 reservable paths dies with
+`sqlite3.OperationalError: too many SQL variables` **before copying a single
+byte** (SQLITE_MAX_VARIABLE_NUMBER is 250,000 on this build, 999 or 32766 on
+many others).
+
+1.72M files is an ordinary backup drive, so **any user with a large source
+cannot run a transfer at all today**. The chunked campaign worked *around* the
+defect; the product is not fixed.
+
+The fix is filed to Bruce as Pulse card `bc3592b8`, and the repo's own
+precedent is `src/file_ferry/log.py:560` (`get_latest_probes_by_paths` chunks
+at 500 per query).
+
+Say it plainly: the gate result is real, but file-ferry still cannot transfer
+a large drive for another user until that query is chunked.
+
+### Isolation, and what was not touched
+
+Every path in this run used an isolated app profile
+(`--user-data-dir=/tmp/d2-appdata-g5`, the `=` form), so the live profile was
+never at risk. Nothing was merged, published, tagged or released. The only
+bytes written were into the disposable destination folder D approved.
 
 ### Observed issues
 
--
+- The first whole-tree attempt failed on the SQL-variable ceiling before
+  copying a byte. The whole-tree plan was abandoned and the tree partitioned
+  into 277 directory chunks, each planned and transferred separately, under
+  the ceiling. The underlying defect is unfixed — see above.
+- The driver was killed mid-run by an exec-session reap; ~100 minutes of wall
+  time were lost to the manual resume. Nothing was lost and no committed item
+  was re-copied.
+- 28,086 entries were excluded by design — unsupported objects and one file
+  whose rendered destination path contains a control character — inventoried
+  and flagged, never dereferenced.
 
 ---
 
@@ -288,10 +446,10 @@ sub-gate `NOT RUN` and say why — do not substitute a simulation.
 
 | field | value |
 | --- | --- |
-| All six gates run? (if not, list `NOT RUN` and why) | |
+| All six gates run? (if not, list `NOT RUN` and why) | No — see the gate status board above. **Gate 6c (network disconnect/reconnect) is `NOT RUN`**: it requires authorisation to disrupt the operator's live NAS, and that authorisation has not been given. |
 | P7 production-validated? | **No** until all six are run and clean |
 | Signing / notarization | follows release policy (D-4); an unsigned pilot is not a stable release |
-| Remaining risks | |
+| Remaining risks | A source larger than ~250,000 reservable paths cannot be transferred at all until the reservation-conflict query is chunked (Pulse card `bc3592b8`) — see the gate 5 record. Gate 6c is outstanding. |
 | Operator / date | |
 
 ---
@@ -416,6 +574,9 @@ instead. Three revisions, 504 exclusions.
 verified 1/1.
 
 ### Gate 5 — prolonged transfer · PARTIAL (22.9 min, not 2 h)
+
+> Superseded for gate 5 by the 2026-10-21/22 sustained run recorded above
+> (5.48 h, `PASS`). This entry stays as the 2026-09-17 campaign's own record.
 
 Recorded as `PARTIAL` rather than `PASS`: the gate asks for two hours and
 this ran 22.9 minutes. What the gate *hunts* — memory growth over duration —

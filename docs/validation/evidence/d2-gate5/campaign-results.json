@@ -1,0 +1,62 @@
+[
+  {
+    "plan": 1,
+    "state": "succeeded",
+    "plan_id": "2671244d-0e8f-48cf-ae92-5bde478fbb31",
+    "files": 182249,
+    "bytes": 331492973458,
+    "minutes": 33.7,
+    "chunk_roots": 6,
+    "chunk_root_paths": "[REDACTED: private source path names \u2014 see README]"
+  },
+  {
+    "plan": 2,
+    "state": "succeeded",
+    "plan_id": "aefcfa69-6bee-4d13-93ba-91cbaffead8a",
+    "files": 199424,
+    "bytes": 13891404836,
+    "minutes": 18.3,
+    "chunk_roots": 7,
+    "chunk_root_paths": "[REDACTED: private source path names \u2014 see README]"
+  },
+  {
+    "plan": 3,
+    "state": "succeeded",
+    "plan_id": "5695b3cc-14dc-4c04-8611-5c4cb373e1b3",
+    "files": 198603,
+    "bytes": 5570842805,
+    "minutes": 17.6,
+    "chunk_roots": 6,
+    "chunk_root_paths": "[REDACTED: private source path names \u2014 see README]"
+  },
+  {
+    "plan": 4,
+    "state": "succeeded",
+    "plan_id": "6fda78a8-5ee6-487b-ac3c-8b86f786956f",
+    "files": 193627,
+    "bytes": 6301993878,
+    "minutes": 17.0,
+    "chunk_roots": 24,
+    "chunk_root_paths": "[REDACTED: private source path names \u2014 see README]"
+  },
+  {
+    "plan": 5,
+    "state": "succeeded",
+    "plan_id": "065beac7-6286-42d7-854f-83e12222ff00",
+    "files": 159404,
+    "bytes": 1500414555,
+    "minutes": 13.1,
+    "chunk_roots": 224,
+    "chunk_root_paths": "[REDACTED: private source path names \u2014 see README]"
+  },
+  {
+    "plan": 6,
+    "state": "succeeded",
+    "plan_id": "a529e783-c406-47d2-9b07-4bb3a28ffd72",
+    "files": 137085,
+    "bytes": 264619378393,
+    "minutes": 26.2,
+    "chunk_roots": 1,
+    "chunk_root_paths": "[REDACTED: private source path names \u2014 see README]"
+  }
+]
