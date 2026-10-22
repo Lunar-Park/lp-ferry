@@ -232,14 +232,47 @@ synthetic source.
 Exclusions were deliberate under spec §6.3: inventoried and flagged, never
 dereferenced, never recreated.
 
-Committed files and bytes exceed the source inventory — 1,897,997 committed
+**Committed files and bytes exceed the source inventory — 1,897,997 committed
 files against 1,720,725 source files, and 681.5 GB committed against 668.5 GB
-of source bytes. The evidence says why: two of the eleven receipts carry
-identical tallies, 179,805 files and 1,352 directories each, because the same
-chunk was transferred twice — once in an 18:59Z run before the collector
-started, and once as the 21:35Z plan the interruption landed in. Both copies
-verify identical, so this is a campaign artifact rather than a transfer
-failure. The cause of the double run is not recorded in the evidence.
+of source bytes — and the excess is accounted for exactly.** One subtree, the
+`2026-10-02-offloaded-snapshots` chunk, was transferred twice, and both copies
+sit on the destination under different prefixes:
+
+| destination prefix | plan | source | files | bytes |
+| --- | --- | --- | --- | --- |
+| `Sources/SRC-A2/` | `9224c551` | the same subtree | 179,805 | 13,015,000,527 |
+| `Sources/SRC-A-2026-10-02-offloaded-snapshots/` | `3539808c` | the same subtree | 179,805 | 13,015,000,527 |
+
+The cause: plan `9224c551` was the **standalone gate-5 run against that one
+subtree** (the 18:59Z run, before the chunked campaign began). When the
+campaign partitioned the tree into 277 directory chunks, that same subtree was
+one of the chunks, and the 21:35Z plan `3539808c` transferred it again — under
+a different label, so the second copy landed beside the first rather than
+overwriting it. The two plans share a source and a fingerprint family but
+write different destination paths.
+
+The arithmetic reconciles to the byte, by destination prefix:
+
+| destination prefix | files | dirs | bytes |
+| --- | --- | --- | --- |
+| the other 276 chunks (source) | 1,538,387 | 13,310 | 655,441,651,964 |
+| the other 276 chunks (destination) | 1,538,387 | 13,310 | 655,441,651,964 |
+| **difference** | **0** | **0** | **0** |
+| the duplicated subtree, twice | 179,805 × 2 | 1,352 × 2 | 13,015,000,527 × 2 |
+| **destination total** | **1,897,997** | **16,014** | **681,471,653,018** |
+
+So **681.5 GB is 668.5 GB of source plus 13.0 GB of one subtree copied
+twice.** The 13.0 GB is a campaign artifact, not a transfer failure: both
+copies verify identical, and the 276 other chunks reconcile to zero
+difference in files, directories and bytes. The destination volume therefore
+holds ~13 GB of redundant data that a correct campaign would not have
+written.
+
+Against the source inventory (1,720,725 files / 668,484,271,502 bytes) the
+destination is 12,987,381,516 bytes larger — the duplicated subtree less
+27,619,011 bytes that the inventory counted and the campaign did not copy.
+That 27.6 MB residual is not explained by the evidence kept here, and is
+recorded rather than reconciled.
 
 ### Sustained throughput (from the timeline)
 
@@ -345,12 +378,16 @@ It was diagnosed **from the database, not the process table**: the execution's
 Recovered with `job_resume()` — the designed path. The runner revalidates the
 plan fingerprint and the source manifest, adopts the existing execution, and
 copies only what is still pending. Pending went 75,761 → 0. The
-already-committed 1.3M items were reused, not re-copied. The relaunch used a
+already-committed items were reused, not re-copied. The relaunch used a
 double-fork + `setsid` wrapper so an exec-session reap could not kill it
 again.
 
-**Zero bytes were re-copied and no committed item was touched.** The restart
-cost ~100 minutes of wall time with no data loss.
+**The resume itself re-copied nothing and touched no committed item.** The
+restart cost ~100 minutes of wall time with no data loss. Note the scope
+precisely: the 13.0 GB double-copy described under *Counts and bytes* is a
+**separate** campaign artifact — the same subtree was planned twice, in two
+different plans, and both transfers succeeded. It is not a product defect and
+not a consequence of the interruption.
 
 ### The defect this gate exposed — still open
 
@@ -369,6 +406,12 @@ defect; the product is not fixed.
 The fix is filed to Bruce as Pulse card `bc3592b8`, and the repo's own
 precedent is `src/file_ferry/log.py:560` (`get_latest_probes_by_paths` chunks
 at 500 per query).
+
+A fix is **in review and not merged**: PR #239
+(`fix/chunk-reservation-conflict-query`, label `agent:steve`) chunks the
+path list and sizes the chunk from the connection's own
+`SQLITE_LIMIT_VARIABLE_NUMBER` rather than a hardcoded constant. Until it
+merges, the defect stands as described here.
 
 Say it plainly: the gate result is real, but file-ferry still cannot transfer
 a large drive for another user until that query is chunked.

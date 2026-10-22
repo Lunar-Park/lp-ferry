@@ -34,9 +34,9 @@ unredacted arrays would have published private path names. The matrix's own
 gate-5 record is written to the same rule — the source and destination appear
 as opaque labels, not as volume names.
 
-The unredacted originals are kept outside the repository, at
-`/Users/selene/Lunar-Park/file-ferry-artifacts/d2-gate5/`, with these
-sha256 sums:
+The unredacted originals are kept outside the repository, in a local
+artifacts directory beside the working tree (path deliberately not recorded
+here — this repository is public), with these sha256 sums:
 
 | file | sha256 |
 | --- | --- |
