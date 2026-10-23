@@ -300,26 +300,76 @@ def update_execution_item(
 # ---- reservations (spec §6.4 cross-job serialization) ---------------------
 
 
+# Bound parameters the conflict query uses besides the path list itself:
+# dest_root, and the optional own-execution exclusion.
+_RESERVATION_CONFLICT_PARAM_MARGIN = 8
+
+
+def _reservation_conflict_chunk_size(conn: sqlite3.Connection) -> int:
+    """How many paths to bind per query.
+
+    SQLite caps the bound parameters in one statement
+    (``SQLITE_LIMIT_VARIABLE_NUMBER``). The cap is a property of the
+    build *and* of the connection's runtime configuration, so it is read
+    from the connection rather than assumed: a fixed size either
+    overflows a build with a lower cap or wastes round trips on one
+    with a higher cap. The margin covers the parameters bound alongside
+    the path list.
+
+    The limit is settable per connection (``setlimit``), which is what
+    lets a test exercise the chunking at a size a test can afford.
+    """
+    limit = conn.getlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER)
+    return max(1, limit - _RESERVATION_CONFLICT_PARAM_MARGIN)
+
+
 def active_reservation_conflicts(
-    conn: sqlite3.Connection, dest_root: str, rel_paths: list[str]
+    conn: sqlite3.Connection,
+    dest_root: str,
+    rel_paths: list[str],
+    *,
+    exclude_execution_id: str | None = None,
 ) -> dict[str, str]:
     """Map each ``rel_path`` already actively reserved to its holder.
 
     The holder is named as the *job* id, because that is what an
     operator can act on (status, cancel, or wait). Returns only
     conflicts; a path reserved by this same execution is not a conflict
-    and is absent (the caller passes its own execution id).
+    and is absent.
+
+    ``exclude_execution_id`` names this execution's own id, and paths it
+    holds are excluded. That exclusion used to be implicit — the caller
+    checked before it reserved, so the two could not overlap — and the
+    docstring described it as though the function did it. It does now.
+    "The caller happens to order these correctly" is not a property of a
+    function that other callers can rely on, and the next caller would
+    have had to rediscover it.
+
+    The path list is queried in chunks. Binding one parameter per path
+    made the statement exceed SQLite's variable limit on any plan over
+    ~250k paths, which fails before a byte is copied — and 1.7M files is
+    an ordinary backup drive, so a real user could not transfer at all.
     """
     if not rel_paths:
         return {}
-    placeholders = ", ".join("?" for _ in rel_paths)
-    rows = conn.execute(
-        "SELECT r.rel_path, r.execution_id, e.job_id FROM transfer_path_reservations r "
-        "JOIN transfer_executions e ON e.id = r.execution_id "
-        f"WHERE r.released_at IS NULL AND r.dest_root = ? AND r.rel_path IN ({placeholders})",
-        [dest_root, *rel_paths],
-    ).fetchall()
-    return {row["rel_path"]: row["job_id"] for row in rows}
+
+    chunk_size = _reservation_conflict_chunk_size(conn)
+    conflicts: dict[str, str] = {}
+    for start in range(0, len(rel_paths), chunk_size):
+        chunk = rel_paths[start : start + chunk_size]
+        placeholders = ", ".join("?" for _ in chunk)
+        sql = (
+            "SELECT r.rel_path, r.execution_id, e.job_id FROM transfer_path_reservations r "
+            "JOIN transfer_executions e ON e.id = r.execution_id "
+            f"WHERE r.released_at IS NULL AND r.dest_root = ? AND r.rel_path IN ({placeholders})"
+        )
+        params: list[object] = [dest_root, *chunk]
+        if exclude_execution_id is not None:
+            sql += " AND r.execution_id != ?"
+            params.append(exclude_execution_id)
+        for row in conn.execute(sql, params).fetchall():
+            conflicts[row["rel_path"]] = row["job_id"]
+    return conflicts
 
 
 def insert_reservations(
