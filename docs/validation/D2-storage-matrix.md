@@ -238,10 +238,10 @@ of source bytes — and the excess is accounted for exactly.** One subtree, the
 `2026-10-02-offloaded-snapshots` chunk, was transferred twice, and both copies
 sit on the destination under different prefixes:
 
-| destination prefix | plan | source | files | bytes |
-| --- | --- | --- | --- | --- |
-| `Sources/SRC-A2/` | `9224c551` | the same subtree | 179,805 | 13,015,000,527 |
-| `Sources/SRC-A-2026-10-02-offloaded-snapshots/` | `3539808c` | the same subtree | 179,805 | 13,015,000,527 |
+| destination prefix | plan | source | files | bytes | on the volume now |
+| --- | --- | --- | --- | --- | --- |
+| `Sources/SRC-A2/` | `9224c551` | the same subtree | 179,805 | 13,015,000,527 | **removed 2026-10-22** — see *Removing the redundant copy* below |
+| `Sources/SRC-A-2026-10-02-offloaded-snapshots/` | `3539808c` | the same subtree | 179,805 | 13,015,000,527 | present |
 
 The cause: plan `9224c551` was the **standalone gate-5 run against that one
 subtree** (the 18:59Z run, before the chunked campaign began). When the
@@ -259,20 +259,54 @@ The arithmetic reconciles to the byte, by destination prefix:
 | the other 276 chunks (destination) | 1,538,387 | 13,310 | 655,441,651,964 |
 | **difference** | **0** | **0** | **0** |
 | the duplicated subtree, twice | 179,805 × 2 | 1,352 × 2 | 13,015,000,527 × 2 |
-| **destination total** | **1,897,997** | **16,014** | **681,471,653,018** |
+| **destination total, as written by the run** | **1,897,997** | **16,014** | **681,471,653,018** |
 
 So **681.5 GB is 668.5 GB of source plus 13.0 GB of one subtree copied
 twice.** The 13.0 GB is a campaign artifact, not a transfer failure: both
 copies verify identical, and the 276 other chunks reconcile to zero
-difference in files, directories and bytes. The destination volume therefore
-holds ~13 GB of redundant data that a correct campaign would not have
-written.
+difference in files, directories and bytes. The run therefore **wrote** ~13 GB
+of redundant data that a correct campaign would not have written. That copy
+was removed from the destination on 2026-10-22, on D's approval, after being
+proven byte-identical to the copy that remains — see *Removing the redundant
+copy* below. The volume now holds 668.5 GB of source bytes and no redundancy.
 
 Against the source inventory (1,720,725 files / 668,484,271,502 bytes) the
 destination is 12,987,381,516 bytes larger — the duplicated subtree less
 27,619,011 bytes that the inventory counted and the campaign did not copy.
 That 27.6 MB residual is not explained by the evidence kept here, and is
 recorded rather than reconciled.
+
+### Removing the redundant copy
+
+On 2026-10-22, on D's approval, the redundant copy was deleted from the
+destination: `Sources/SRC-A2/` (179,805 files, 13,015,000,527 bytes) was
+removed, and `Sources/SRC-A-2026-10-02-offloaded-snapshots/` — the same
+179,805 files, the same 13,015,000,527 bytes — was kept. The volume went
+from 267 GiB free to 280 GiB free.
+
+Before deleting anything, the two copies were proven to hold the same data:
+
+- **Identical file sets.** The same 179,805 relative paths in both, none
+  present in one and absent from the other.
+- **Identical bytes.** 400 randomly sampled pairs (seed 20261022), sha256
+  over each file in both copies: **400 identical, 0 different, 0 missing.**
+- **Both match the plan's own recorded totals** — 179,805 files and
+  13,015,000,527 bytes — which the two plan receipts report identically in
+  both `expected` and `actual`.
+- **The source was never at risk.** The source subtree still holds 179,810
+  regular files, 13.47 GB, and the deletion was refused by the check that
+  verifies it before anything is removed.
+
+One counting subtlety, because it looks like a discrepancy and is not: the
+source subtree holds 179,810 regular files but 181,302 entries. The 1,492
+extra are symlinks, which §6.3 excludes from the transfer by design
+(inventoried and flagged, never dereferenced or recreated). A verification
+pass that compares `os.walk` counts against the plan's file count is
+therefore always 1,492 short of the plan — and it is the counting method
+that is wrong, not the data.
+
+**The figures above are what the run wrote.** The volume now holds 668.5 GB
+of source bytes and no redundancy.
 
 ### Sustained throughput (from the timeline)
 
@@ -389,38 +423,51 @@ precisely: the 13.0 GB double-copy described under *Counts and bytes* is a
 different plans, and both transfers succeeded. It is not a product defect and
 not a consequence of the interruption.
 
-### The defect this gate exposed — still open
+### The defect this gate exposed — now fixed
 
 `active_reservation_conflicts()`
 (`src/file_ferry/persistence/repositories/transfer_executions.py:303`) builds
 a single `rel_path IN (?,?,…)` with **one SQL placeholder per file**. Any
-plan with more than ~250,000 reservable paths dies with
+plan with more than ~250,000 reservable paths died with
 `sqlite3.OperationalError: too many SQL variables` **before copying a single
 byte** (SQLITE_MAX_VARIABLE_NUMBER is 250,000 on this build, 999 or 32766 on
 many others).
 
 1.72M files is an ordinary backup drive, so **any user with a large source
-cannot run a transfer at all today**. The chunked campaign worked *around* the
-defect; the product is not fixed.
+could not run a transfer at all** while that stood. The chunked campaign
+worked *around* the defect.
 
-The fix is filed to Bruce as Pulse card `bc3592b8`, and the repo's own
-precedent is `src/file_ferry/log.py:560` (`get_latest_probes_by_paths` chunks
-at 500 per query).
+The fix was filed as Pulse card `bc3592b8` and the repo's own precedent is
+`src/file_ferry/log.py:560` (`get_latest_probes_by_paths` chunks at 500 per
+query).
 
-A fix is **in review and not merged**: PR #239
-(`fix/chunk-reservation-conflict-query`, label `agent:steve`) chunks the
-path list and sizes the chunk from the connection's own
-`SQLITE_LIMIT_VARIABLE_NUMBER` rather than a hardcoded constant. Until it
-merges, the defect stands as described here.
+**Fixed.** PR #239 (`fix/chunk-reservation-conflict-query`, labels
+`agent:steve` and `agent:cassian`) chunks the path list and sizes the chunk
+from the connection's own `SQLITE_LIMIT_VARIABLE_NUMBER` rather than a
+hardcoded constant. It was merged to `main` on 2026-10-22, merge commit
+`01efb651`, on D's approval. It was reviewed independently before merge: the
+red phase reproduced in a clean clone, 6/6 new tests, the full suite green,
+`ruff` clean, CI 6/6, and 300,000 paths through the real code path finding
+every reserved path in 0.13 s across two chunks.
 
-Say it plainly: the gate result is real, but file-ferry still cannot transfer
-a large drive for another user until that query is chunked.
+**What is still not proven, and is not claimed:** no live transfer over the
+ceiling has run on the fixed code. **This run predates the fix** — gate 5
+was measured on the code that died at 1,720,725 paths. The chunked campaign
+is evidence that the chunked shape works in production; it is *not* evidence
+that a single large plan now works end to end. That is the next gate-5
+re-run, and it is the one thing still outstanding on this gate.
+
+Say it plainly: the gate result is real, the defect that broke large
+transfers is closed, and the product has not yet been shown copying a single
+plan larger than the old ceiling.
 
 ### Isolation, and what was not touched
 
 Every path in this run used an isolated app profile
 (`--user-data-dir=/tmp/d2-appdata-g5`, the `=` form), so the live profile was
-never at risk. Nothing was merged, published, tagged or released. The only
+never at risk. Nothing was merged, published, tagged or released **by the run
+itself**; the PRs carrying this record and the query fix were reviewed and
+merged separately, after the run. The only
 bytes written were into the disposable destination folder D approved.
 
 ### Observed issues
@@ -428,7 +475,8 @@ bytes written were into the disposable destination folder D approved.
 - The first whole-tree attempt failed on the SQL-variable ceiling before
   copying a byte. The whole-tree plan was abandoned and the tree partitioned
   into 277 directory chunks, each planned and transferred separately, under
-  the ceiling. The underlying defect is unfixed — see above.
+  the ceiling. The underlying defect was live during this run; it is fixed
+  now — see above.
 - The driver was killed mid-run by an exec-session reap; ~100 minutes of wall
   time were lost to the manual resume. Nothing was lost and no committed item
   was re-copied.
