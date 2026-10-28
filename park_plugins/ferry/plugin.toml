@@ -1,0 +1,29 @@
+id = "ferry"
+name = "Ferry"
+version = "0.1.0"
+park = ">=0.1"
+summary = "Ingest: card offloads, proxies, Resolve projects and transfer receipts."
+modules = ["park_plugins.ferry.records", "park_plugins.ferry.ops"]
+
+[[jobs]]
+name = "copy"
+handler = "park_plugins.ferry.jobs:copy"
+needs = []
+egress = "none"
+
+[[jobs]]
+name = "proxy"
+handler = "park_plugins.ferry.jobs:proxy"
+needs = ["ffmpeg"]
+egress = "none"
+
+[[jobs]]
+name = "resolve"
+handler = "park_plugins.ferry.jobs:resolve"
+needs = []
+egress = "none"
+
+[[views]]
+id = "ingest"
+title = "Ingest"
+entry = "views/ingest.js"

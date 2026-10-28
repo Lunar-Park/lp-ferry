@@ -69,13 +69,18 @@ tui = []
 ferry = "file_ferry.cli:main"
 ferry-service = "file_ferry.service.cli:main"
 
+# The park plugin. `ferry` (the CLI above) stays as it is until the cutover;
+# park loads ops, jobs and the Ingest view from park_plugins/ferry.
+[project.entry-points."park.plugins"]
+ferry = "park_plugins.ferry"
+
 [project.urls]
-Homepage = "https://github.com/dspury/file-ferry"
-Source = "https://github.com/dspury/file-ferry"
-Issues = "https://github.com/dspury/file-ferry/issues"
+Homepage = "https://github.com/Lunar-Park/lp-ferry"
+Source = "https://github.com/Lunar-Park/lp-ferry"
+Issues = "https://github.com/Lunar-Park/lp-ferry/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/file_ferry"]
+packages = ["src/file_ferry", "park_plugins"]
 
 [tool.ruff]
 line-length = 100
