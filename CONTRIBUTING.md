@@ -38,8 +38,8 @@ in-flight design decisions than to be welcomed — see
 the desktop app only). macOS and Linux are the supported platforms.
 
 ```bash
-git clone https://github.com/dspury/file-ferry.git
-cd file-ferry
+git clone https://github.com/Lunar-Park/lp-ferry.git
+cd lp-ferry
 
 python3 -m venv .venv
 source .venv/bin/activate

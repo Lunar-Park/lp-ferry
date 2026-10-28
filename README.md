@@ -1,9 +1,9 @@
 # file-ferry
 
-[![Version](https://img.shields.io/badge/version-0.3.0-blue)](https://github.com/dspury/file-ferry)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue)](https://github.com/Lunar-Park/lp-ferry)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![CI](https://img.shields.io/github/actions/workflow/status/dspury/file-ferry/ci.yml?style=flat-square)](https://github.com/dspury/file-ferry/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/Lunar-Park/lp-ferry/ci.yml?style=flat-square)](https://github.com/Lunar-Park/lp-ferry/actions/workflows/ci.yml)
 
 > A CLI + interactive TUI for the boring-but-critical infrastructure underneath video post-production: probe camera cards, organize them, generate proxies, spin up a DaVinci Resolve project, and verify backups — every step logged to a local SQLite audit trail.
 
@@ -41,8 +41,8 @@ ferry --no-tui run ./raw/
 
 ```bash
 # 1. Get the code
-git clone https://github.com/dspury/file-ferry.git
-cd file-ferry
+git clone https://github.com/Lunar-Park/lp-ferry.git
+cd lp-ferry
 
 # 2. Install (use pipx for an isolated install, or pip if you don't have it)
 pipx install .
@@ -178,8 +178,8 @@ Exit codes from `verify`: `0` = clean, `1` = missing, `2` = modified, `3` = adde
 **Install:**
 
 ```bash
-git clone https://github.com/dspury/file-ferry.git
-cd file-ferry
+git clone https://github.com/Lunar-Park/lp-ferry.git
+cd lp-ferry
 pipx install .                # clean isolated install
 #   — or —
 pip install .                 # into your current environment
@@ -188,8 +188,8 @@ pip install .                 # into your current environment
 **From a working tree (development):**
 
 ```bash
-git clone https://github.com/dspury/file-ferry.git
-cd file-ferry
+git clone https://github.com/Lunar-Park/lp-ferry.git
+cd lp-ferry
 pip install -e ".[dev]"
 ```
 
@@ -315,7 +315,7 @@ Longer-term ideas (not yet scheduled):
 ## Contributing
 
 Open source under the MIT license. Issues and PRs welcome on
-[GitHub](https://github.com/dspury/file-ferry).
+[GitHub](https://github.com/Lunar-Park/lp-ferry).
 
 Before you start, please read **[`CONTRIBUTING.md`](./CONTRIBUTING.md)** — it
 covers setup, the exact gates CI runs, what state the project is actually in
@@ -325,8 +325,8 @@ production-validated), and the scope decisions that are already settled.
 Development setup:
 
 ```bash
-git clone https://github.com/dspury/file-ferry.git
-cd file-ferry
+git clone https://github.com/Lunar-Park/lp-ferry.git
+cd lp-ferry
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
