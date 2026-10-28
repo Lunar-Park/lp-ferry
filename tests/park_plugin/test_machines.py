@@ -17,6 +17,9 @@ from park.ops import REGISTRY, op  # noqa: E402
 @pytest.fixture
 def submitted():
     calls = []
+    # park registers the real queue op; the stand-in replaces it for the test and the real
+    # one is put back afterwards.
+    real = REGISTRY.pop("machines.job.submit", None)
 
     @op("machines.job.submit", summary="Stand-in for park's queue.", effect="read")
     def submit(ctx, plugin: str, name: str, params: dict | None = None, machine: str | None = None):
@@ -27,6 +30,8 @@ def submitted():
         yield calls
     finally:
         REGISTRY.pop("machines.job.submit", None)
+        if real is not None:
+            REGISTRY["machines.job.submit"] = real
 
 
 def test_offload_queues_the_copy_and_records_the_job(call, card, tmp_path, submitted):

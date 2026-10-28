@@ -23,7 +23,7 @@ def media(tmp_path):
     return root
 
 
-def test_a_project_request_records_its_settings_and_bins(call, media, tmp_path):
+def test_a_project_request_records_its_settings_and_bins(call, media, tmp_path, no_queue):
     request = call(
         "ferry.resolve_project",
         {

@@ -23,13 +23,13 @@ def _offload(call, plan):
     return call("ferry.offload", {"plan": plan["id"]})
 
 
-def test_offload_queues_a_transfer_and_says_whether_a_queue_took_it(call, card, tmp_path):
+def test_offload_queues_a_transfer_and_says_whether_a_queue_took_it(call, card, tmp_path, no_queue):
     plan = _plan(call, card, tmp_path / "offload")
     transfer = _offload(call, plan)
     assert transfer["plan"] == plan["id"]
     assert transfer["files"] == plan["copies"]
     assert transfer["bytes"] == plan["bytes"]
-    # No machines layer in this checkout, so the record is written and nothing is queued.
+    # With no machines layer, the record is written and nothing is queued.
     assert transfer["queued"] is False
     assert transfer["job"] is None
     row = call("ferry.transfer.get", {"id": transfer["transfer"]})

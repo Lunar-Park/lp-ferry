@@ -43,7 +43,7 @@ def stub_ffmpeg(tmp_path):
     return path
 
 
-def test_a_proxy_request_names_the_video_only(call, media, tmp_path):
+def test_a_proxy_request_names_the_video_only(call, media, tmp_path, no_queue):
     request = call(
         "ferry.proxies", {"source": str(media), "destination": str(tmp_path / "proxies")}
     )

@@ -101,3 +101,16 @@ def job_context(park, tmp_path):
         )
 
     return build
+
+
+@pytest.fixture
+def no_queue():
+    """A home whose park has no machines layer: ferry records the work and queues nothing."""
+    from park.ops import REGISTRY
+
+    real = REGISTRY.pop("machines.job.submit", None)
+    try:
+        yield
+    finally:
+        if real is not None:
+            REGISTRY["machines.job.submit"] = real
