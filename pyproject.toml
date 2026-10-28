@@ -70,9 +70,9 @@ ferry = "file_ferry.cli:main"
 ferry-service = "file_ferry.service.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/dspury/file-ferry"
-Source = "https://github.com/dspury/file-ferry"
-Issues = "https://github.com/dspury/file-ferry/issues"
+Homepage = "https://github.com/Lunar-Park/lp-ferry"
+Source = "https://github.com/Lunar-Park/lp-ferry"
+Issues = "https://github.com/Lunar-Park/lp-ferry/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/file_ferry"]
