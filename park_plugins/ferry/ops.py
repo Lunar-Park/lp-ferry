@@ -173,10 +173,27 @@ def ferry_plan(
 
 
 @_op("ferry.plan.get", summary="One plan with every file in it.")
-def ferry_plan_get(ctx: OpContext, id: Annotated[str, "Plan id"]) -> dict:
-    """The items are in ``rel`` order, so two reads of the same plan line up."""
-    row = _plan_row(ctx, id, items=True)
-    return records.plan_out(row, row["items"])
+def ferry_plan_get(
+    ctx: OpContext,
+    id: Annotated[str, "Plan id"],
+    items_limit: Annotated[
+        int | None, "Return at most this many files; every file when absent"
+    ] = None,
+) -> dict:
+    """The items are in ``rel`` order, so two reads of the same plan line up.
+
+    ``files`` is always the plan's full count, so a view that asked for a page of the
+    items can say how many it left out.
+    """
+    if items_limit is not None and items_limit < 1:
+        raise Invalid("items_limit must be at least 1")
+    row = _plan_row(ctx, id)
+    sql = "SELECT * FROM ferry_plan_items WHERE plan=? ORDER BY rel"
+    params: tuple = (id,)
+    if items_limit is not None:
+        sql += " LIMIT ?"
+        params = (id, items_limit)
+    return records.plan_out(row, ctx.all(sql, params))
 
 
 @_op("ferry.plan.list", summary="Plans, newest first.")
@@ -198,11 +215,7 @@ def ferry_plan_list(
     return [records.plan_out(row) for row in ctx.all(sql, tuple(params))]
 
 
-@_op(
-    "ferry.source.list", summary="Source folders ferry has planned from, and whether they are here."
-)
-def ferry_source_list(ctx: OpContext) -> list[dict]:
-    """One row per source: how many plans, how many files, and if the folder is mounted."""
+def _sources(ctx: OpContext) -> list[dict]:
     rows = ctx.all(
         "SELECT source, COUNT(*) AS plans, SUM(files) AS files, SUM(bytes) AS bytes,"
         " MAX(created) AS last_plan FROM ferry_plans GROUP BY source ORDER BY last_plan DESC"
@@ -222,6 +235,188 @@ def ferry_source_list(ctx: OpContext) -> list[dict]:
             }
         )
     return out
+
+
+@_op(
+    "ferry.source.list", summary="Source folders ferry has planned from, and whether they are here."
+)
+def ferry_source_list(ctx: OpContext) -> list[dict]:
+    """One row per source: how many plans, how many files, and if the folder is mounted."""
+    return _sources(ctx)
+
+
+# -- the Ingest view's one read ------------------------------------------------------
+
+INGEST_STATE = {
+    "queued": "queued",
+    "running": "running",
+    "copied": "done",
+    "partial": "partial",
+    "failed": "failed",
+}
+RECEIPT_STATE = {"ok": "done", "partial": "partial", "failed": "failed"}
+
+
+def _in(column: str, values: list[str]) -> tuple[str, tuple]:
+    return f"{column} IN ({', '.join('?' for _ in values)})", tuple(values)
+
+
+def _offload_row(plan: dict, transfer: dict | None, receipt: dict | None, attempts: int,
+                 mounted: bool) -> dict:
+    """One offload: the plan, the newest transfer that ran it and the receipt it left."""
+    path = Path(plan["source"])
+    destination = Path(plan["destination"])
+    row = {
+        "kind": "offload",
+        "id": plan["id"],
+        "plan": plan["id"],
+        "label": plan["label"],
+        "card": path.name or plan["source"],
+        "source": plan["source"],
+        "mounted": mounted,
+        "destination": plan["destination"],
+        "destination_name": destination.name or plan["destination"],
+        "on_conflict": plan["on_conflict"],
+        "files": plan["files"],
+        "copies": plan["copies"],
+        "skips": plan["skips"],
+        "bytes": plan["bytes"],
+        "created": plan["created"],
+        "state": "planned",
+        "transfer": None,
+        "attempts": attempts,
+        "receipt": receipt["id"] if receipt else None,
+        "digest": (receipt or {}).get("digest") or None,
+        "fraction": None,
+        "done": 0,
+        "total": plan["copies"],
+        "failed": 0,
+        "verified": 0,
+        "errors": [],
+        "note": None,
+        "machine": None,
+        "queued": None,
+        "started": None,
+        "ended": None,
+        "when": plan["created"],
+    }
+    if transfer is not None:
+        row.update(
+            {
+                "state": INGEST_STATE.get(transfer["status"], "queued"),
+                "transfer": transfer["id"],
+                "fraction": transfer["fraction"],
+                "done": transfer["done"],
+                "total": transfer["total"] or plan["copies"],
+                "failed": transfer["failed"],
+                "verified": transfer["verified"],
+                "errors": transfer["errors"],
+                "note": transfer["note"],
+                "machine": transfer["machine"],
+                "queued": transfer["queued"],
+                "started": transfer["started"],
+                "ended": transfer["ended"],
+                "when": transfer["ended"]
+                or transfer["started"]
+                or transfer["queued"]
+                or plan["created"],
+            }
+        )
+        if transfer["status"] in ("copied", "partial", "failed"):
+            row["bytes"] = transfer["bytes"] or plan["bytes"]
+    return row
+
+
+@_op(
+    "ferry.ingest.list",
+    summary="What the Ingest view shows, in one read: the cards and one row per offload.",
+    returns="{sources, rows, more}",
+)
+def ferry_ingest_list(
+    ctx: OpContext,
+    limit: Annotated[int, "Maximum rows to return"] = 100,
+) -> dict:
+    """``rows`` is newest first. An offload row joins a plan with the newest transfer that
+    ran it and the receipt that transfer left, so the view needs no read per row; a proxy or
+    Resolve receipt is a row of its own, because nothing else says it happened. ``more`` is
+    true when older rows were left out."""
+    limit, _ = _window(limit, 0)
+    sources = _sources(ctx)
+    mounted = {item["source"]: item["mounted"] for item in sources}
+
+    plans = [records.plan_out(row) for row in ctx.all(
+        "SELECT * FROM ferry_plans ORDER BY created DESC, id DESC LIMIT ?", (limit + 1,))]
+    more = len(plans) > limit
+    plans = plans[:limit]
+
+    transfers: dict[str, list[dict]] = {}
+    receipts: dict[str, dict] = {}
+    if plans:
+        clause, params = _in("plan", [plan["id"] for plan in plans])
+        for row in ctx.all(f"SELECT * FROM ferry_transfers WHERE {clause}", params):
+            transfers.setdefault(row["plan"], []).append(records.transfer_out(row))
+        ids_ = [item["id"] for group in transfers.values() for item in group]
+        if ids_:
+            clause, params = _in("transfer", ids_)
+            for row in ctx.all(
+                f"SELECT * FROM ferry_receipts WHERE {clause} ORDER BY created, id", params
+            ):
+                receipts[row["transfer"]] = records.receipt_summary(row)
+
+    rows = []
+    for plan in plans:
+        ran = sorted(
+            transfers.get(plan["id"], []),
+            key=lambda item: (item["queued"] or item["started"] or item["ended"] or "", item["id"]),
+        )
+        newest = ran[-1] if ran else None
+        receipt = receipts.get(newest["id"]) if newest else None
+        here = mounted.get(plan["source"], False)
+        rows.append(_offload_row(plan, newest, receipt, len(ran), here))
+
+    extra = ctx.all(
+        "SELECT * FROM ferry_receipts WHERE kind != 'copy' ORDER BY created DESC, id DESC LIMIT ?",
+        (limit,),
+    )
+    for row in extra:
+        summary = records.receipt_summary(row)
+        detail = (records.receipt_out(row).get("detail")) or {}
+        request = detail.get("request")
+        source = ""
+        if request:
+            table = (
+                "ferry_proxy_requests" if summary["kind"] == "proxy" else "ferry_resolve_requests"
+            )
+            found = ctx.one(f"SELECT source FROM {table} WHERE id=?", (request,))
+            source = (found or {}).get("source") or ""
+        card = Path(source).name if source else ""
+        word = "Proxies" if summary["kind"] == "proxy" else "Resolve project"
+        rows.append(
+            {
+                "kind": summary["kind"],
+                "id": summary["id"],
+                "plan": summary["plan"],
+                "label": f"{word} for {card}" if card else word,
+                "card": card,
+                "source": source,
+                "mounted": mounted.get(source, False),
+                "destination": "",
+                "destination_name": detail.get("name") or "",
+                "files": summary["files"],
+                "bytes": summary["bytes"],
+                "state": RECEIPT_STATE.get(summary["status"], "done"),
+                "receipt": summary["id"],
+                "digest": summary["digest"] or None,
+                "errors": summary["errors"],
+                "failed": len(summary["errors"]),
+                "machine": summary["machine"],
+                "ended": summary["created"],
+                "created": summary["created"],
+                "when": summary["created"],
+            }
+        )
+    rows.sort(key=lambda item: (item["when"] or "", item["id"]), reverse=True)
+    return {"sources": sources, "rows": rows[:limit], "more": more or len(rows) > limit}
 
 
 # -- transfers ---------------------------------------------------------------------
@@ -625,6 +820,7 @@ __all__ = [
     "ferry_plan_get",
     "ferry_plan_list",
     "ferry_proxies",
+    "ferry_ingest_list",
     "ferry_receipt_get",
     "ferry_receipt_list",
     "ferry_receipt_record",

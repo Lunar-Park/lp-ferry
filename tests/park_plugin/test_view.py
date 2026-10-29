@@ -1,8 +1,7 @@
-"""The Ingest view: an ES module that parses and exports mount(el, api)."""
+"""The Ingest view: an ES module exporting mount(el, api), drawn from one read."""
 
 from __future__ import annotations
 
-import json
 import re
 import shutil
 import subprocess
@@ -12,18 +11,28 @@ import pytest
 
 pytest.importorskip("park", reason="park is not installed")
 
-VIEW = Path(__file__).resolve().parents[2] / "park_plugins" / "ferry" / "views" / "ingest.js"
+HERE = Path(__file__).resolve().parent
+VIEW = HERE.parents[1] / "park_plugins" / "ferry" / "views" / "ingest.js"
 NODE = shutil.which("node")
 
 
 def test_the_view_file_is_there_and_names_mount():
     source = VIEW.read_text(encoding="utf-8")
-    assert re.search(r"export\s+async\s+function\s+mount\s*\(\s*el\s*,\s*api\s*\)", source)
-    assert "ferry.plan.list" in source
-    assert "ferry.receipt.list" in source
-    assert "ferry.transfer.list" in source
-    # Comments and text in the view carry no em dashes.
-    assert "\u2014" not in source
+    # A sync mount: the shell calls what mount returns to take the view down, and a promise
+    # cannot be called.
+    assert re.search(r"export\s+function\s+mount\s*\(\s*el\s*,\s*api", source)
+    assert "ferry.ingest.list" in source
+    assert "ferry.plan.get" in source
+    # Comments and text in the view carry no em dashes, and it imports nothing from the app.
+    assert "—" not in source
+    assert "/app/" not in source
+
+
+def test_the_view_reads_with_the_ops_the_plugin_has(call):
+    names = {spec["name"] for spec in call("op.list", {"plugin": "ferry"})}
+    source = VIEW.read_text(encoding="utf-8")
+    for op in sorted(set(re.findall(r'api\.call\("(ferry\.[a-z_.]+)"', source))):
+        assert op in names, f"the view calls {op}, which the plugin does not have"
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
@@ -37,56 +46,10 @@ def test_the_view_parses_as_an_es_module(tmp_path):
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
-def test_the_view_loads_its_exports_and_mounts_against_a_stub_api(tmp_path):
-    module = tmp_path / "ingest.mjs"
-    module.write_text(VIEW.read_text(encoding="utf-8"), encoding="utf-8")
-    script = tmp_path / "run.mjs"
-    script.write_text(
-        f"""
-const stub = {{
-  calls: [],
-  subscribe(kinds, fn) {{ this.kinds = kinds; this.listener = fn; return () => {{}}; }},
-  async call(op) {{
-    this.calls.push(op);
-    if (op === "ferry.source.list") return [{{ source: "/card", label: "CARD_A",
-      plans: 1, files: 2, bytes: 2048, last_plan: "2026-01-01T00:00:00Z", mounted: true }}];
-    if (op === "ferry.plan.list") return [];
-    if (op === "ferry.transfer.list") return [];
-    if (op === "ferry.receipt.list") return [];
-    return {{}};
-  }},
-}};
-const dom = [];
-const fakeElement = {{
-  className: "", textContent: "", style: {{}},
-  children: [],
-  classList: {{ add() {{}}, remove() {{}} }},
-  append(...kids) {{ this.children.push(...kids); }},
-  addEventListener() {{}},
-  setAttribute() {{}},
-}};
-globalThis.document = {{
-  createElement: () => Object.assign({{}}, fakeElement, {{ children: [], append() {{}} }}),
-  createTextNode: (text) => ({{ text }}),
-  getElementById: () => null,
-  head: {{ append() {{}} }},
-}};
-globalThis.Node = function Node() {{}};
-const module = await import({json.dumps(str(module))});
-if (typeof module.mount !== "function") {{
-  console.error("mount is not exported");
-  process.exit(1);
-}}
-const mounted = await module.mount(fakeElement, stub);
-const order = stub.calls.join(",");
-if (!order.includes("ferry.source.list") || !order.includes("ferry.receipt.list")) {{
-  console.error("mount did not read the ferry ops: " + order);
-  process.exit(1);
-}}
-if (mounted && typeof mounted.unmount === "function") mounted.unmount();
-console.log("ok");
-"""
+def test_the_view_draws_each_state_against_a_stub_api():
+    done = subprocess.run(
+        [NODE, str(HERE / "ingest_view_scenarios.mjs"), str(VIEW)],
+        capture_output=True, text=True, check=False, timeout=60,
     )
-    done = subprocess.run([NODE, str(script)], capture_output=True, text=True, check=False)
-    assert done.returncode == 0, done.stderr
-    assert done.stdout.strip() == "ok"
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout.strip().endswith("ok")

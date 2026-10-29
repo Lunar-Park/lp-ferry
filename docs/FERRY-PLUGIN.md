@@ -16,9 +16,10 @@ disk outside park's write lock.
 | Op | Effect | What it does |
 |---|---|---|
 | `ferry.plan` | external | Scan a source folder, probe the media, render a destination for every file, record the plan |
-| `ferry.plan.get` | read | One plan with every file in it |
+| `ferry.plan.get` | read | One plan with every file in it, or the first `items_limit` of them |
 | `ferry.plan.list` | read | Plans, newest first |
 | `ferry.source.list` | read | Source folders ferry has planned from, and whether each is mounted |
+| `ferry.ingest.list` | read | The Ingest view's one read: the sources, and one row per offload with its newest transfer and receipt joined (plus a row per proxy or Resolve receipt) |
 | `ferry.offload` | write | Queue a plan's copy as a `ferry.copy` job and record the transfer |
 | `ferry.transfer.get` | read | One transfer with its progress |
 | `ferry.transfer.list` | read | Transfers, newest first |
@@ -81,9 +82,14 @@ then `~/.ferry/config.toml`, then defaults.
 ## The Ingest view
 
 `views/ingest.js` exports `mount(el, api)` and is served at
-`/plugins/ferry/views/ingest.js`. It shows the sources ferry has planned from, the plans,
-the transfers and their progress, and the receipts. It reads the ops above and refreshes
-on `ferry.plan.created`, `ferry.transfer.*` and `ferry.receipt.recorded`.
+`/plugins/ferry/views/ingest.js`. park mounts it as the Library's Ingest tab. It draws from one
+read, `ferry.ingest.list`: a dense list with one row per offload (card, where it lands, size, and
+where it stands), grouped as in progress, needs a look, planned and done, with the cards in the
+sidebar as a filter. A row opens in the inspector (paths, the copy's figures, problems, and a page
+of the plan's files from `ferry.plan.get`). The page's one action plans a card (`ferry.plan`);
+a planned offload is queued, and a failed one retried, from its inspector (`ferry.offload`).
+Events on `ferry.plan.created`, `ferry.transfer.*` and `ferry.receipt.recorded` patch the rows
+they name, so progress costs no request.
 
 ## What the plugin does not do yet
 
