@@ -1,5 +1,10 @@
 # file-ferry
 
+Park integration: this repository provides ingest, transfers, proxies and Resolve tooling. Park owns the integrated
+workspace in `park/app/workspaces/ferry/`; the plugin ships operations, data and adapters,
+without another copy of the Park UI. Existing standalone tools remain available where
+needed. Reusable skills are maintained in LP Skills.
+
 [![Version](https://img.shields.io/badge/version-0.3.0-blue)](https://github.com/dspury/file-ferry)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)

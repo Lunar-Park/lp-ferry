@@ -22,8 +22,3 @@ name = "resolve"
 handler = "park_plugins.ferry.jobs:resolve"
 needs = []
 egress = "none"
-
-[[views]]
-id = "ingest"
-title = "Ingest"
-entry = "views/ingest.js"
