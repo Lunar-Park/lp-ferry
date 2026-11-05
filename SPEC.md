@@ -1,7 +1,7 @@
 # file-ferry — Spec v0.3.0
 
 > **Name:** `file-ferry`
-> **Repo location:** `dspury/file-ferry`
+> **Repo location:** `Lunar-Park/lp-ferry`
 > **Version:** 0.3.0
 > **Status:** Released — stable
 
@@ -517,7 +517,7 @@ ferry --help
 
 - PyPI distribution name: `file-ferry`
 - Python package import name: `file_ferry`
-- GitHub repo: `dspury/file-ferry`
+- GitHub repo: `Lunar-Park/lp-ferry`
 - CLI command: `ferry`
 - Service entry point: `ferry-service`
 
@@ -725,7 +725,9 @@ tests, ruff, and mypy strict still clean.
   `pyproject.toml`; the author field now reads `name = "Lunar Park"`.
   The `LICENSE` copyright line was updated to match. The GitHub handle
   (`dspury`) and repo URL (`github.com/dspury/file-ferry`) are unchanged
-  because those are the actual repo location.
+  because those are the actual repo location. (The repo later moved to the
+  `Lunar-Park` org on 2026-10-28 — see "Repo moved to the Lunar-Park org"
+  below. The v0.2.3 record above is left as it was written.)
 
 ---
 
@@ -835,6 +837,34 @@ this document and the README.
 
 ---
 
+### Repo moved to the Lunar-Park org — 2026-10-28
+
+The repository moved from the personal account `dspury/file-ferry` to the
+organization `Lunar-Park/lp-ferry`. GitHub installed a redirect, so the old
+clone URL still resolves and existing installs keep working — this is a
+documentation and identity change, not a code change.
+
+What changed, and what did not:
+
+- **Package identity is unchanged.** `file-ferry` on PyPI, `file_ferry` as the
+  import name, `ferry` as the command, and `ferry-service` as the service entry
+  point are all exactly as they were. The two-name rule in §14 stands.
+- **The clone directory name changed.** Cloning
+  `https://github.com/Lunar-Park/lp-ferry.git` now produces a directory named
+  `lp-ferry`, not `file-ferry`. The README, CONTRIBUTING and this document
+  were updated together so that every `git clone` line is followed by a `cd`
+  into the directory that clone actually creates.
+- **`RENAME.md` §1.4 (PyPI) is still D's.** The `file-ferry` name on PyPI is
+  unregistered and unpublished; the version in `pyproject.toml` is `0.3.0`, and
+  no `v0.3.0` tag or GitHub release exists. Publishing is D's decision and was
+  not taken as part of this move.
+
+The historical rename record in this document — the `media-mate` → `file-ferry`
+change in §19 and the identity table under "v0.3.0 — Rename to file-ferry" — is
+left as it was written. It records what was true at the time.
+
+---
+
 ## 20. Open issues — v0.3 candidates
 
 The following issues are acknowledged and targeted for v0.3. Each requires a spec change or design decision before implementation.
@@ -913,7 +943,7 @@ All items below were approved at spec time and shipped in v0.1.0:
 - Safety constraints in §11
 - Versioning rule in §13 (MAJOR=0 until D approves)
 - License: MIT
-- Repo location: `dspury/file-ferry`
+- Repo location: `Lunar-Park/lp-ferry`
 - Name: `file-ferry`
 - First tagged version: 0.1.0
 
