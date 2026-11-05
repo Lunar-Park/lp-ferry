@@ -4,6 +4,12 @@
 
 Rename the project from `media-mate` to `file-ferry` and make the DaVinci Resolve integration an optional dependency. TUI stays bundled. No feature removal — just cleaner packaging.
 
+> **Later move — 2026-10-28.** The repo moved from the personal account
+> `dspury/file-ferry` to the organization `Lunar-Park/lp-ferry`. See
+> ["Second rename: repo moved to the Lunar-Park org"](#second-rename-repo-moved-to-the-lunar-park-org)
+> at the end of this document. The plan below is the record of the
+> `media-mate` → `file-ferry` rename and is left as it was written.
+
 ---
 
 ## Phase 1: Rename
@@ -133,7 +139,8 @@ Actually — Resolve has no pip dependency. It's detected at runtime. So `option
 ## Decisions
 
 - [x] **Version number** — v0.3.0 (continuity from media-mate)
-- [x] **GitHub org** — `dspury/file-ferry` (personal)
+- [x] **GitHub org** — `dspury/file-ferry` (personal) — *superseded 2026-10-28;
+      the repo now lives at `Lunar-Park/lp-ferry` (org)*
 - [x] **CLI command** — `ferry`
 
 ---
@@ -209,3 +216,44 @@ All four are done; see the "desktop shell boot path" commit. Fixing them
 surfaced five further defects that had never been reachable because the shell
 had never started. Full list in that commit message; the security-relevant one
 is written up as [ADR-0006](docs/adr/0006-development-csp-relaxation.md).
+
+---
+
+## Second rename: repo moved to the Lunar-Park org
+
+**Date:** 2026-10-28. **Type:** GitHub organization move, not a package rename.
+
+The repository moved from the personal account `dspury/file-ferry` to the
+organization `Lunar-Park/lp-ferry`, alongside the rest of the Lunar Park
+open-source portfolio. GitHub installed a permanent redirect, so the old URL
+still resolves and existing clones keep working.
+
+### What did not change
+
+- **The package.** `file-ferry` on PyPI, `file_ferry` as the import name,
+  `ferry` as the command, `ferry-service` as the service entry point. The
+  two-name rule in SPEC.md §14 stands unchanged — `file-ferry` is the project,
+  `ferry` is what you type.
+- **The code.** No source file was touched by the move.
+- **The version.** Still `0.3.0` in `pyproject.toml`, still untagged and
+  unreleased.
+
+### What did change
+
+- **The clone directory name.** Cloning the new URL produces a directory named
+  `lp-ferry`, where it used to produce `file-ferry`. Every `git clone` line in
+  `README.md` and `CONTRIBUTING.md` is now paired with a `cd` into the
+  directory that clone actually creates, so the quickstart cannot break.
+- **The canonical URL.** `README.md`, `CONTRIBUTING.md`, `pyproject.toml`
+  (`[project.urls]`) and `SPEC.md` now name `Lunar-Park/lp-ferry`.
+
+### What was deliberately not done
+
+- **No release, no tag, no publish.** The `file-ferry` name on PyPI is still
+  unregistered; there is still no `v0.3.0` tag and no GitHub release. Those
+  are D's decision and were not taken as part of the move.
+- **The Electron `appId` was left alone.** It is still
+  `io.github.dspury.file-ferry`. Changing an app identifier that has already
+  shipped in a build is a packaging decision with upgrade consequences, not a
+  documentation one, so it is out of scope for this change.
+- **The `media-mate` → `file-ferry` history above was not rewritten.**

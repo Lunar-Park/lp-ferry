@@ -261,8 +261,9 @@ def _in(column: str, values: list[str]) -> tuple[str, tuple]:
     return f"{column} IN ({', '.join('?' for _ in values)})", tuple(values)
 
 
-def _offload_row(plan: dict, transfer: dict | None, receipt: dict | None, attempts: int,
-                 mounted: bool) -> dict:
+def _offload_row(
+    plan: dict, transfer: dict | None, receipt: dict | None, attempts: int, mounted: bool
+) -> dict:
     """One offload: the plan, the newest transfer that ran it and the receipt it left."""
     path = Path(plan["source"])
     destination = Path(plan["destination"])
@@ -344,8 +345,12 @@ def ferry_ingest_list(
     sources = _sources(ctx)
     mounted = {item["source"]: item["mounted"] for item in sources}
 
-    plans = [records.plan_out(row) for row in ctx.all(
-        "SELECT * FROM ferry_plans ORDER BY created DESC, id DESC LIMIT ?", (limit + 1,))]
+    plans = [
+        records.plan_out(row)
+        for row in ctx.all(
+            "SELECT * FROM ferry_plans ORDER BY created DESC, id DESC LIMIT ?", (limit + 1,)
+        )
+    ]
     more = len(plans) > limit
     plans = plans[:limit]
 
@@ -815,12 +820,12 @@ def ferry_resolve_project(
 
 
 __all__ = [
+    "ferry_ingest_list",
     "ferry_offload",
     "ferry_plan",
     "ferry_plan_get",
     "ferry_plan_list",
     "ferry_proxies",
-    "ferry_ingest_list",
     "ferry_receipt_get",
     "ferry_receipt_list",
     "ferry_receipt_record",

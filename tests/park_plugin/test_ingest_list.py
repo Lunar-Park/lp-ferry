@@ -70,10 +70,16 @@ def test_a_row_follows_its_transfer_from_queued_to_done_with_the_receipt(
 def test_a_retry_shows_the_newest_transfer_and_counts_the_attempts(call, card, tmp_path, no_queue):
     plan = _plan(call, card, tmp_path / "landing")
     first = call("ferry.offload", {"plan": plan["id"]})
-    call("ferry.receipt.record", {
-        "kind": "copy", "status": "failed", "transfer": first["transfer"], "plan": plan["id"],
-        "errors": ["A001C001.mov: the card was pulled"],
-    })
+    call(
+        "ferry.receipt.record",
+        {
+            "kind": "copy",
+            "status": "failed",
+            "transfer": first["transfer"],
+            "plan": plan["id"],
+            "errors": ["A001C001.mov: the card was pulled"],
+        },
+    )
     (failed,) = call("ferry.ingest.list", {})["rows"]
     assert failed["state"] == "failed"
     assert failed["errors"] == ["A001C001.mov: the card was pulled"]
@@ -86,10 +92,16 @@ def test_a_retry_shows_the_newest_transfer_and_counts_the_attempts(call, card, t
 
 def test_a_proxy_receipt_is_a_row_of_its_own(call, card, tmp_path, no_queue):
     _plan(call, card, tmp_path / "landing")
-    call("ferry.receipt.record", {
-        "kind": "proxy", "status": "partial", "errors": ["C0001.mp4: no video stream"],
-        "total_bytes": 1024, "detail": {"codec": "prores_proxy"},
-    })
+    call(
+        "ferry.receipt.record",
+        {
+            "kind": "proxy",
+            "status": "partial",
+            "errors": ["C0001.mp4: no video stream"],
+            "total_bytes": 1024,
+            "detail": {"codec": "prores_proxy"},
+        },
+    )
     rows = call("ferry.ingest.list", {})["rows"]
     assert sorted(item["kind"] for item in rows) == ["offload", "proxy"]
     proxy = next(item for item in rows if item["kind"] == "proxy")
