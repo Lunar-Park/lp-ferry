@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import errno
+import os
 from pathlib import Path
 
 import pytest
@@ -9,7 +11,9 @@ import pytest
 pytest.importorskip("park", reason="park is not installed")
 
 from park_plugins.ferry import jobs
-from park_plugins.ferry.copy import hash_file
+from park_plugins.ferry.copy import CopyError, copy_verified, hash_file
+
+pytestmark = pytest.mark.usefixtures("no_queue")
 
 
 def _plan(call, card, destination):
@@ -143,7 +147,7 @@ def test_a_copy_that_does_not_match_is_not_registered(
 ):
     """The job hashes the file that landed and refuses to call a bad copy an asset."""
 
-    def lying_copy(source, dest, *, overwrite=True):
+    def lying_copy(source, dest, *, check_cancelled=None):
         path = Path(dest)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"corrupted on the way")
@@ -202,9 +206,109 @@ def test_a_skipped_file_is_registered_where_it_already_is(call, card, tmp_path, 
     receipt = call("ferry.receipt.list", {"transfer": transfer["transfer"]})[0]
     full = call("ferry.receipt.get", {"id": receipt["id"]})
     assert all(row["skipped"] is True for row in full["files"])
-    assert all(row["verified"] is False for row in full["files"])
+    assert all(row["verified"] is True for row in full["files"])
     row = call("ferry.transfer.get", {"id": transfer["transfer"]})
     assert row["skipped"] == len(card.names)
+
+
+@pytest.mark.parametrize("present_at_plan", [False, True])
+def test_changed_destination_is_never_overwritten_or_counted_as_verified(
+    call, card, tmp_path, job_context, present_at_plan,
+):
+    dest = tmp_path / "offload"
+    file = dest / "notes.txt"
+    if present_at_plan:
+        dest.mkdir()
+        file.write_bytes(b"X" * (card.path / "notes.txt").stat().st_size)
+    plan = _plan(call, card, dest)
+    if not present_at_plan:
+        dest.mkdir()
+        file.write_bytes(b"appeared while queueing")
+    original = file.read_bytes()
+    transfer = _offload(call, plan)
+    result = jobs.copy(job_context("copy", {"plan": plan["id"], "transfer": transfer["transfer"]}))
+    receipt = call("ferry.receipt.get", {"id": result["receipt"]})
+    assert file.read_bytes() == original
+    assert result["status"] == "partial"
+    assert all(item["rel"] != "notes.txt" for item in receipt["files"])
+    assert any("already exists with different contents" in error for error in receipt["errors"])
+
+
+def test_a_canceled_copy_keeps_its_verified_partial_receipt(call, card, tmp_path, job_context, monkeypatch):
+    from park.machines.contract import JobCancelled
+
+    plan = _plan(call, card, tmp_path / "offload")
+    transfer = _offload(call, plan)
+    context = job_context("copy", {"plan": plan["id"], "transfer": transfer["transfer"]})
+    monkeypatch.setattr(context, "progress", lambda *args: context.cancel())
+    with pytest.raises(JobCancelled):
+        jobs.copy(context)
+    summary = call("ferry.receipt.list", {"transfer": transfer["transfer"]})[0]
+    receipt = call("ferry.receipt.get", {"id": summary["id"]})
+    assert receipt["detail"]["canceled"] is True
+    assert receipt["status"] == "partial" and len(receipt["files"]) == 1
+
+
+@pytest.mark.parametrize("operation", ["registration", "transfer progress"])
+def test_a_node_failure_keeps_earlier_verified_files_in_the_receipt(
+    call, card, tmp_path, job_context, monkeypatch, operation,
+):
+    from park.node.client import NodeError
+
+    plan = _plan(call, card, tmp_path / "offload")
+    transfer = _offload(call, plan)
+    ctx = job_context("copy", {"plan": plan["id"], "transfer": transfer["transfer"]})
+    register, ask = ctx.register_output, ctx.call
+
+    def register_output(*args, **kwargs):
+        if ctx.outputs:
+            raise NodeError("reply was lost")
+        return register(*args, **kwargs)
+
+    def node_call(name, args):
+        if name == "ferry.transfer.progress":
+            raise NodeError("reply was lost")
+        return ask(name, args)
+
+    if operation == "registration":
+        monkeypatch.setattr(ctx, "register_output", register_output)
+    else:
+        monkeypatch.setattr(ctx, "call", node_call)
+    result = jobs.copy(ctx)
+    receipt = call("ferry.receipt.get", {"id": result["receipt"]})
+    assert receipt["status"] == "partial" and len(receipt["files"]) == 1
+    assert receipt["files"][0]["rel"] == card.names[0]
+    assert f"Park did not confirm {operation}" in receipt["errors"][0]
+
+
+def test_publication_never_replaces_a_file_that_appeared_after_staging(tmp_path, monkeypatch):
+    source, dest = tmp_path / "source", tmp_path / "dest"
+    source.write_bytes(b"source bytes")
+    link = os.link
+
+    def competing_write(staged, target):
+        assert Path(staged).read_bytes() == b"source bytes"
+        Path(target).write_bytes(b"other writer")
+        link(staged, target)
+
+    monkeypatch.setattr(os, "link", competing_write)
+    with pytest.raises(FileExistsError):
+        copy_verified(source, dest)
+    assert dest.read_bytes() == b"other writer"
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["dest", "source"]
+
+
+def test_destination_without_safe_publication_fails_closed(tmp_path, monkeypatch):
+    source, dest = tmp_path / "source", tmp_path / "dest"
+    source.write_bytes(b"source bytes")
+
+    def unsupported(*args):
+        raise OSError(errno.ENOTSUP, "no hard links")
+
+    monkeypatch.setattr(os, "link", unsupported)
+    with pytest.raises(CopyError, match="does not support safe no-replace publication"):
+        copy_verified(source, dest)
+    assert list(tmp_path.iterdir()) == [source]
 
 
 def test_a_transfer_cannot_be_closed_twice(call, card, tmp_path, job_context):

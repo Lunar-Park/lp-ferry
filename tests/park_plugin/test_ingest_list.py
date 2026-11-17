@@ -6,6 +6,8 @@ import pytest
 
 pytest.importorskip("park", reason="park is not installed")
 
+pytestmark = pytest.mark.usefixtures("no_queue")
+
 from park_plugins.ferry import jobs
 
 

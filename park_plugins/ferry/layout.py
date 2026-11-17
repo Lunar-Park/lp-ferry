@@ -137,6 +137,55 @@ def free_name(path: Path) -> Path:
     raise FileExistsError(f"no free name beside {path}")
 
 
+def mount_signature(root: Path) -> list[int]:
+    """Observe the actual directory, so a reused mount path invalidates a plan."""
+    if root.resolve(strict=True) != root or not root.is_dir():
+        raise ValueError(f"not the planned folder: {root}")
+    info = root.stat()
+    return [info.st_dev, info.st_ino]
+
+
+def require_inside(path: Path, root: Path) -> None:
+    if path == root or not path.is_relative_to(root) or path.resolve() != path:
+        raise ValueError(f"{path} is outside {root} or passes through a symlink")
+
+
+def validate_mounts(plan: dict) -> None:
+    for field, signature in (plan.get("mounts") or {}).items():
+        root = Path(plan[field])
+        if mount_signature(root) != signature:
+            raise ValueError(f"{field} mount changed since planning: {root}")
+
+
+def build_owned(
+    source: str, destination: str, config: Config, *, label: str | None, read_probe: bool
+) -> dict:
+    """Build a plan on the node that can see both independent roots."""
+    if config.on_conflict == "overwrite":
+        raise ValueError(
+            "Worker copies preserve existing destinations. Set organize.on_conflict to 'skip' or 'rename'."
+        )
+    roots = {
+        field: Path(value).expanduser().resolve(strict=True)
+        for field, value in (("source", source), ("destination", destination))
+    }
+    src, dest = roots.values()
+    if src.is_relative_to(dest) or dest.is_relative_to(src):
+        raise ValueError("source and destination must be separate folders")
+    mounts = {field: mount_signature(root) for field, root in roots.items()}
+    result = build(src, dest, config, label=label, read_probe=read_probe)
+    destinations = set()
+    for item in result["items"]:
+        path = Path(item["dest"])
+        require_inside(path, dest)
+        if path in destinations:
+            raise ValueError(f"multiple source files would land at {path}")
+        destinations.add(path)
+    result["mounts"] = mounts
+    validate_mounts(result)
+    return result
+
+
 def build(
     source: Path | str,
     destination: Path | str,

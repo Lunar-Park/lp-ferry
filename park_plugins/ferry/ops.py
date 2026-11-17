@@ -17,7 +17,7 @@ from typing import Annotated, Any, Literal
 
 from park.kernel import ids
 from park.kernel.log import utc_now
-from park.ops import Conflict, Invalid, NotFound, OpContext, op
+from park.ops import Conflict, Invalid, NotFound, OpContext, Unavailable, op
 from park.ops import resolve as resolve_op
 
 from . import config as ferry_config
@@ -29,6 +29,11 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 RECEIPT_STATUS = Literal["ok", "partial", "failed"]
 TRANSFER_STATUS = {"ok": "copied", "partial": "partial", "failed": "failed"}
 MAX_WINDOW = 500
+TRANSFER_READ = (
+    "SELECT f.*, j.status AS job_status, j.error AS job_error"
+    " FROM ferry_transfers AS f LEFT JOIN jobs AS j ON j.id=f.job"
+)
+SOURCE_ROLE = "source"
 
 
 # -- shared helpers ----------------------------------------------------------------
@@ -77,7 +82,7 @@ def _plan_row(ctx: OpContext, plan: str, *, items: bool = False) -> dict:
 
 
 def _transfer_row(ctx: OpContext, transfer: str) -> dict:
-    row = ctx.one("SELECT * FROM ferry_transfers WHERE id=?", (transfer,))
+    row = ctx.one(f"{TRANSFER_READ} WHERE f.id=?", (transfer,))
     if row is None:
         raise NotFound(f"no such transfer: {transfer}")
     return row
@@ -110,7 +115,7 @@ def _submit(ctx: OpContext, job: str, params: dict, machine: str | None) -> tupl
     job_id = None
     if isinstance(result, dict):
         job_id = result.get("id") or result.get("job")
-    return job_id, True
+    return job_id, bool(job_id)
 
 
 def _file_rows(files: list[dict] | None) -> list[dict]:
@@ -131,6 +136,7 @@ def _file_rows(files: list[dict] | None) -> list[dict]:
                 "dest": str(item.get("dest") or ""),
                 "sha256": digest,
                 "size": size,
+                "kind": str(item.get("kind") or ""),
                 "verified": bool(item.get("verified", True)),
                 "skipped": bool(item.get("skipped", False)),
             }
@@ -159,17 +165,38 @@ def ferry_plan(
     label: Annotated[str | None, "Name for the plan; the source folder's name when absent"] = None,
     config_path: Annotated[str | None, "ferry.toml to read"] = None,
     probe: Annotated[bool, "Read media metadata with ffprobe when it is installed"] = True,
+    machine: Annotated[str | None, "Worker that can see both folders"] = None,
+    project: Annotated[str | None, "Project id or slug"] = None,
 ) -> dict:
     """Reads the source outside the write lock, then records the plan as one event."""
-    settings = _config(config_path)
-    root = _folder(source, "source")
-    plan = layout.build(root, destination, settings, label=label, read_probe=probe)
+    if project and not machine:
+        raise Invalid("choose the worker that owns the source and destination")
+    scope = ctx.call("project.get", {"project": project}) if project else None
+    if machine:
+        owner = ctx.call("machines.get", {"machine": machine})["id"]
+        plan = ctx.node_call(
+            "ferry.plan", {
+                "source": source, "destination": destination, "label": label,
+                "config_path": config_path, "probe": probe,
+            }, machine=owner,
+        )
+        if plan.get("machine") != owner or not plan.get("mounts"):
+            raise Conflict("the selected worker did not confirm both folders")
+    else:
+        settings = _config(config_path)
+        root = _folder(source, "source")
+        plan = layout.build(root, destination, settings, label=label, read_probe=probe)
     if not plan["files"]:
-        raise Invalid(f"no files to plan under {root}")
+        raise Invalid(f"no files to plan under {plan['source']}")
     plan_id = ids.new_id()
     created = _now()
-    ctx.write("ferry.plan.created", {"id": plan_id, "created": created, **plan})
-    return {"id": plan_id, "created": created, **plan}
+    result = {
+        "id": plan_id, "created": created, **plan,
+        "project": scope["id"] if scope else None,
+        "project_slug": scope["slug"] if scope else None,
+    }
+    ctx.write("ferry.plan.created", result, project=result["project"])
+    return result
 
 
 @_op("ferry.plan.get", summary="One plan with every file in it.")
@@ -215,10 +242,13 @@ def ferry_plan_list(
     return [records.plan_out(row) for row in ctx.all(sql, tuple(params))]
 
 
-def _sources(ctx: OpContext) -> list[dict]:
+def _sources(ctx: OpContext, project: str | None = None) -> list[dict]:
+    where, params = (" WHERE project=?", (project,)) if project else ("", ())
     rows = ctx.all(
-        "SELECT source, COUNT(*) AS plans, SUM(files) AS files, SUM(bytes) AS bytes,"
-        " MAX(created) AS last_plan FROM ferry_plans GROUP BY source ORDER BY last_plan DESC"
+        "SELECT source, machine, COUNT(*) AS plans, SUM(files) AS files, SUM(bytes) AS bytes,"
+        f" MAX(created) AS last_plan FROM ferry_plans{where}"
+        " GROUP BY source, machine ORDER BY last_plan DESC",
+        params,
     )
     out = []
     for row in rows:
@@ -231,7 +261,8 @@ def _sources(ctx: OpContext) -> list[dict]:
                 "files": row["files"] or 0,
                 "bytes": row["bytes"] or 0,
                 "last_plan": row["last_plan"],
-                "mounted": path.is_dir(),
+                "machine": row["machine"],
+                "mounted": None if row["machine"] else path.is_dir(),
             }
         )
     return out
@@ -262,7 +293,7 @@ def _in(column: str, values: list[str]) -> tuple[str, tuple]:
 
 
 def _offload_row(
-    plan: dict, transfer: dict | None, receipt: dict | None, attempts: int, mounted: bool
+    plan: dict, transfer: dict | None, receipt: dict | None, attempts: int, mounted: bool | None
 ) -> dict:
     """One offload: the plan, the newest transfer that ran it and the receipt it left."""
     path = Path(plan["source"])
@@ -271,6 +302,9 @@ def _offload_row(
         "kind": "offload",
         "id": plan["id"],
         "plan": plan["id"],
+        "project": plan["project"],
+        "project_slug": plan["project_slug"],
+        "owner": plan["machine"],
         "label": plan["label"],
         "card": path.name or plan["source"],
         "source": plan["source"],
@@ -293,27 +327,38 @@ def _offload_row(
         "total": plan["copies"],
         "failed": 0,
         "verified": 0,
+        "skipped": 0,
         "errors": [],
         "note": None,
-        "machine": None,
+        "machine": plan["machine"],
+        "job": None,
+        "job_status": None,
         "queued": None,
         "started": None,
         "ended": None,
         "when": plan["created"],
     }
     if transfer is not None:
+        state = INGEST_STATE.get(transfer["status"], "queued")
+        errors = transfer["errors"]
+        if not receipt and transfer["job_status"] in ("done", "failed", "canceled"):
+            state = "canceled" if transfer["job_status"] == "canceled" else "failed"
+            errors = errors or [transfer["job_error"] or f"Copy job {state} before it wrote a receipt"]
         row.update(
             {
-                "state": INGEST_STATE.get(transfer["status"], "queued"),
+                "state": state,
                 "transfer": transfer["id"],
                 "fraction": transfer["fraction"],
                 "done": transfer["done"],
                 "total": transfer["total"] or plan["copies"],
                 "failed": transfer["failed"],
                 "verified": transfer["verified"],
-                "errors": transfer["errors"],
+                "skipped": transfer["skipped"],
+                "errors": errors,
                 "note": transfer["note"],
                 "machine": transfer["machine"],
+                "job": transfer["job"],
+                "job_status": transfer["job_status"],
                 "queued": transfer["queued"],
                 "started": transfer["started"],
                 "ended": transfer["ended"],
@@ -324,7 +369,7 @@ def _offload_row(
             }
         )
         if transfer["status"] in ("copied", "partial", "failed"):
-            row["bytes"] = transfer["bytes"] or plan["bytes"]
+            row["bytes"] = transfer["bytes"]
     return row
 
 
@@ -336,19 +381,23 @@ def _offload_row(
 def ferry_ingest_list(
     ctx: OpContext,
     limit: Annotated[int, "Maximum rows to return"] = 100,
+    project: Annotated[str | None, "Only this project's plans and transfers, by id or slug"] = None,
 ) -> dict:
     """``rows`` is newest first. An offload row joins a plan with the newest transfer that
     ran it and the receipt that transfer left, so the view needs no read per row; a proxy or
     Resolve receipt is a row of its own, because nothing else says it happened. ``more`` is
     true when older rows were left out."""
     limit, _ = _window(limit, 0)
-    sources = _sources(ctx)
-    mounted = {item["source"]: item["mounted"] for item in sources}
+    project_id = ctx.call("project.get", {"project": project})["id"] if project else None
+    sources = _sources(ctx, project_id)
+    mounted = {(item["source"], item["machine"]): item["mounted"] for item in sources}
+    where, args = (" WHERE project=?", (project_id,)) if project_id else ("", ())
 
     plans = [
         records.plan_out(row)
         for row in ctx.all(
-            "SELECT * FROM ferry_plans ORDER BY created DESC, id DESC LIMIT ?", (limit + 1,)
+            f"SELECT * FROM ferry_plans{where} ORDER BY created DESC, id DESC LIMIT ?",
+            (*args, limit + 1),
         )
     ]
     more = len(plans) > limit
@@ -357,8 +406,8 @@ def ferry_ingest_list(
     transfers: dict[str, list[dict]] = {}
     receipts: dict[str, dict] = {}
     if plans:
-        clause, params = _in("plan", [plan["id"] for plan in plans])
-        for row in ctx.all(f"SELECT * FROM ferry_transfers WHERE {clause}", params):
+        clause, params = _in("f.plan", [plan["id"] for plan in plans])
+        for row in ctx.all(f"{TRANSFER_READ} WHERE {clause}", params):
             transfers.setdefault(row["plan"], []).append(records.transfer_out(row))
         ids_ = [item["id"] for group in transfers.values() for item in group]
         if ids_:
@@ -376,10 +425,10 @@ def ferry_ingest_list(
         )
         newest = ran[-1] if ran else None
         receipt = receipts.get(newest["id"]) if newest else None
-        here = mounted.get(plan["source"], False)
+        here = mounted.get((plan["source"], plan["machine"]))
         rows.append(_offload_row(plan, newest, receipt, len(ran), here))
 
-    extra = ctx.all(
+    extra = [] if project_id else ctx.all(
         "SELECT * FROM ferry_receipts WHERE kind != 'copy' ORDER BY created DESC, id DESC LIMIT ?",
         (limit,),
     )
@@ -404,7 +453,7 @@ def ferry_ingest_list(
                 "label": f"{word} for {card}" if card else word,
                 "card": card,
                 "source": source,
-                "mounted": mounted.get(source, False),
+                "mounted": mounted.get((source, None), False),
                 "destination": "",
                 "destination_name": detail.get("name") or "",
                 "files": summary["files"],
@@ -438,14 +487,41 @@ def ferry_offload(
     plan: Annotated[str, "Plan id from ferry.plan"],
     machine: Annotated[str | None, "Node that should run the copy"] = None,
 ) -> dict:
-    """Records the transfer first, then hands the job to the queue.
-
-    ``queued`` says whether park's machines layer took the job. Without it the
-    transfer is recorded and the copy job runs from wherever the source is mounted.
-    """
-    row = _plan_row(ctx, plan, items=True)
+    """Queue one live transfer per owned plan and return the exact job it uses."""
+    row = _plan_row(ctx, plan)
+    owner = row.get("machine")
+    if not owner:
+        try:
+            resolve_op("machines.job.submit")
+        except NotFound:
+            pass  # Historical in-process copy, with no distributed queue.
+        else:
+            raise Invalid("plan again on the worker that owns both folders before queueing a copy")
+    if owner and machine and ctx.call("machines.get", {"machine": machine})["id"] != owner:
+        raise Conflict(f"plan belongs to {owner}; plan again to choose another worker")
+    if owner:
+        machine = owner
+        current = ctx.one(
+            f"{TRANSFER_READ} WHERE f.plan=? ORDER BY f.id DESC LIMIT 1", (plan,),
+        )
+        if current and current["job"] and (
+            current["status"] == "copied" or (
+                current["status"] in ("queued", "running")
+                and current["job_status"] not in ("done", "failed", "canceled")
+            )
+        ):
+            return {
+                "plan": plan, "transfer": current["id"], "job": current["job"],
+                "machine": owner, "queued": True, "files": row["files"], "bytes": row["bytes"],
+            }
     transfer = ids.new_id()
-    job_id, queued = _submit(ctx, "copy", {"plan": plan, "transfer": transfer}, machine)
+    params = {"plan": plan, "transfer": transfer}
+    if owner:
+        params["machine"] = owner
+    job_id, queued = _submit(ctx, "copy", params, machine)
+    if owner and not queued:
+        raise Unavailable("Park did not accept the copy job")
+    total = row["files"] if owner else row["copies"]
     ctx.write(
         "ferry.transfer.queued",
         {
@@ -453,7 +529,7 @@ def ferry_offload(
             "plan": plan,
             "job": job_id,
             "machine": machine,
-            "total": row["copies"],
+            "total": total,
             "queued": _now(),
         },
     )
@@ -463,7 +539,7 @@ def ferry_offload(
         "job": job_id,
         "machine": machine,
         "queued": queued,
-        "files": row["copies"],
+        "files": total,
         "bytes": row["bytes"],
     }
 
@@ -486,15 +562,15 @@ def ferry_transfer_list(
 ) -> list[dict]:
     """The Ingest view reads this for its progress list."""
     limit, offset = _window(limit, offset)
-    sql = "SELECT * FROM ferry_transfers WHERE 1=1"
+    sql = f"{TRANSFER_READ} WHERE 1=1"
     params: list = []
     if plan is not None:
-        sql += " AND plan=?"
+        sql += " AND f.plan=?"
         params.append(plan)
     if status is not None:
-        sql += " AND status=?"
+        sql += " AND f.status=?"
         params.append(status)
-    sql += " ORDER BY COALESCE(queued, started, ended) DESC, id DESC LIMIT ? OFFSET ?"
+    sql += " ORDER BY COALESCE(f.queued, f.started, f.ended) DESC, f.id DESC LIMIT ? OFFSET ?"
     params.extend([limit, offset])
     return [records.transfer_out(row) for row in ctx.all(sql, tuple(params))]
 
@@ -507,7 +583,12 @@ def ferry_transfer_start(
     machine: Annotated[str | None, "Node running it"] = None,
 ) -> dict:
     """The copy job calls this once, before its first file."""
-    _transfer_row(ctx, transfer)
+    current = _transfer_row(ctx, transfer)
+    if current["ended"]:
+        raise Conflict(f"transfer {transfer} already ended as {current['status']}")
+    owner = _plan_row(ctx, current["plan"]).get("machine")
+    if owner and (owner != machine or current["job"] != job):
+        raise Conflict("the transfer belongs to a different worker or job")
     ctx.write(
         "ferry.transfer.started",
         {"id": transfer, "job": job, "machine": machine, "started": _now()},
@@ -569,6 +650,10 @@ def ferry_receipt_record(
         current = _transfer_row(ctx, transfer)
         if current["ended"]:
             raise Conflict(f"transfer {transfer} already ended as {current['status']}")
+        planned = _plan_row(ctx, current["plan"])
+        owner = planned.get("machine")
+        if owner and (owner != machine or current["job"] != job or planned["id"] != plan):
+            raise Conflict("the receipt belongs to a different worker, job or plan")
     if kind == "copy" and transfer is None:
         raise Invalid("a copy receipt has to name the transfer it closes")
     if plan is not None:
@@ -619,7 +704,49 @@ def ferry_receipt_get(ctx: OpContext, id: Annotated[str, "Receipt id"]) -> dict:
     row = ctx.one("SELECT * FROM ferry_receipts WHERE id=?", (id,))
     if row is None:
         raise NotFound(f"no such receipt: {id}")
-    return records.receipt_out(row)
+    receipt = records.receipt_out(row)
+    if receipt.get("kind") == "copy" and receipt.get("plan"):
+        plan = _plan_row(ctx, receipt["plan"])
+        if plan.get("project"):
+            receipt["filing"] = _filing(ctx, plan, receipt)
+    return receipt
+
+
+def _verified_hashes(receipt: dict) -> list[str]:
+    return sorted({item["sha256"] for item in receipt["files"] if item["verified"]})
+
+
+def _filing(ctx: OpContext, plan: dict, receipt: dict) -> dict:
+    verified = _verified_hashes(receipt)
+    attached = {
+        row["sha256"] for row in ctx.all(
+            "SELECT sha256 FROM project_assets WHERE project=? AND role=?",
+            (plan["project"], SOURCE_ROLE),
+        )
+    }
+    return {
+        "project": plan["project"], "project_slug": plan["project_slug"], "role": SOURCE_ROLE,
+        "attached": [sha for sha in verified if sha in attached],
+        "pending": [sha for sha in verified if sha not in attached],
+    }
+
+
+@_op("ferry.receipt.file", summary="File the receipt's verified media as project sources.", effect="write")
+def ferry_receipt_file(ctx: OpContext, id: Annotated[str, "Copy receipt id"]) -> dict:
+    """File the verified hashes in their originating project. Safe to repair or repeat."""
+    receipt = ferry_receipt_get(ctx, id)
+    if "filing" not in receipt:
+        raise Invalid("the copy receipt does not have an originating project")
+    filing = receipt["filing"]
+    errors = []
+    for digest in filing["pending"]:
+        try:
+            ctx.call("project.attach_asset", {
+                "project": filing["project"], "sha256": digest, "role": SOURCE_ROLE,
+            })
+        except NotFound as exc:
+            errors.append({"sha256": digest, "message": str(exc)})
+    return {**_filing(ctx, _plan_row(ctx, receipt["plan"]), receipt), "errors": errors}
 
 
 @_op("ferry.receipt.list", summary="Receipts, newest first.")

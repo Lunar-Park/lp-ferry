@@ -29,9 +29,14 @@ CREATE TABLE IF NOT EXISTS ferry_plans (
     skips INTEGER NOT NULL DEFAULT 0,
     bytes INTEGER NOT NULL DEFAULT 0,
     by_kind TEXT NOT NULL DEFAULT '{}',
+    machine TEXT,
+    project TEXT,
+    project_slug TEXT,
+    mounts TEXT,
     created TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ferry_plans_by_source ON ferry_plans (source, id);
+CREATE INDEX IF NOT EXISTS ferry_plans_by_project ON ferry_plans (project, id);
 CREATE TABLE IF NOT EXISTS ferry_plan_items (
     plan TEXT NOT NULL,
     rel TEXT NOT NULL,
@@ -186,6 +191,10 @@ def _apply_plan_created(conn, event: dict) -> None:
             "skips": data["skips"],
             "bytes": data["bytes"],
             "by_kind": _dumps(data.get("by_kind") or {}),
+            "machine": data.get("machine"),
+            "project": data.get("project"),
+            "project_slug": data.get("project_slug"),
+            "mounts": _dumps(data["mounts"]) if data.get("mounts") else None,
             "created": data["created"],
         },
     )
@@ -393,6 +402,10 @@ def plan_out(row: dict, items: list[dict] | None = None) -> dict:
         "skips": row["skips"],
         "bytes": row["bytes"],
         "by_kind": _loads(row.get("by_kind"), {}),
+        "machine": row.get("machine"),
+        "project": row.get("project"),
+        "project_slug": row.get("project_slug"),
+        "mounts": _loads(row.get("mounts"), None),
         "created": row["created"],
     }
     if items is not None:
@@ -418,6 +431,8 @@ def transfer_out(row: dict) -> dict:
         "id": row["id"],
         "plan": row["plan"],
         "job": row["job"],
+        "job_status": row.get("job_status"),
+        "job_error": row.get("job_error"),
         "machine": row["machine"],
         "status": row["status"],
         "total": row["total"],

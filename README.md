@@ -5,6 +5,22 @@ workspace in `park/app/workspaces/ferry/`; the plugin ships operations, data and
 without another copy of the Park UI. Existing standalone tools remain available where
 needed. Reusable skills are maintained in LP Skills.
 
+For Park offloads, `ferry.plan` takes a `machine` that can see both existing source and
+destination folders, plus an optional Park `project`. Planning runs there, and `ferry.offload`
+queues that same worker. Older unowned plans remain readable but must be replanned before
+using the shared queue. This does not change the standalone CLI/TUI below.
+
+Worker-owned plans support `skip` and `rename`, and reject `on_conflict = "overwrite"`.
+Existing files are hashed and accepted only when they match; a newly appearing destination
+is never replaced. Verified staging uses atomic hard-link publication, so destinations
+without hard-link support fail explicitly and need separate qualification. Source/destination
+mount identity is checked again before copying. Cancellation or a node RPC failure preserves
+previously verified work in a partial receipt when the hub can acknowledge it.
+
+For project-bound plans, verified media is filed as project sources after the copy receipt
+is saved. Filing failure leaves the verified copy intact. `ferry.receipt.file` (also Park's
+**Retry project filing**) repairs attachment from that receipt without copying again.
+
 [![Version](https://img.shields.io/badge/version-0.3.0-blue)](https://github.com/Lunar-Park/lp-ferry)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)

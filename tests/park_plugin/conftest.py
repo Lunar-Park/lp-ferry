@@ -7,6 +7,7 @@ The fixtures here import park inside the fixture body for the same reason.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -114,3 +115,45 @@ def no_queue():
     finally:
         if real is not None:
             REGISTRY["machines.job.submit"] = real
+
+
+@pytest.fixture
+def worker_plan(park, call, card, tmp_path):
+    """The real broker offers planning to a simulated worker with the fixture card."""
+    from park.machines import calls
+    from park.machines.contract import LocalCallContext
+
+    from park_plugins.ferry import jobs
+
+    owner = call("machines.register", {"name": "Ferry Worker", "id": "worker-a"})
+    other = call("machines.register", {"name": "Other Worker", "id": "worker-b"})
+    owner_row = park.one("SELECT * FROM machines WHERE id=?", (owner["id"],))
+    other_row = park.one("SELECT * FROM machines WHERE id=?", (other["id"],))
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    broker = calls.start(park)
+
+    def build(**extra):
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            reply = pool.submit(call, "ferry.plan", {
+                "machine": owner["name"], "source": str(card.path),
+                "destination": str(destination), "probe": False, **extra,
+            })
+            try:
+                assert broker.poll(other_row, wait=0.05, plugins=["ferry"]) is None
+                offered = broker.poll(owner_row, wait=2, plugins=["ferry"])
+                assert offered and offered["name"] == "plan"
+                ctx = LocalCallContext(park, "ferry", "plan", offered["params"], tmp_path, machine=owner["id"])
+                try:
+                    result = jobs.plan(ctx)
+                except (OSError, ValueError) as exc:
+                    broker.result(offered["id"], owner["id"], ok=False, result=None, error=str(exc))
+                else:
+                    broker.result(offered["id"], owner["id"], ok=True, result=result, error=None)
+                return reply.result(timeout=2)
+            finally:
+                if not reply.done():
+                    calls.stop(broker)
+
+    yield build
+    calls.stop(broker)

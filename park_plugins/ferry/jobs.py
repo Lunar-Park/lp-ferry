@@ -12,15 +12,16 @@ import json
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from . import layout
-from .copy import CopyError, copy_verified
+from . import config, layout
+from .copy import CopyError, copy_verified, hash_file
 from .probe import scan
 
 if TYPE_CHECKING:  # park is not importable in a plain interpreter
-    from park.machines.contract import JobContext
+    from park.machines.contract import CallContext, JobContext
 
 PRORES_PROFILES = {
     "prores422proxy": 0,
@@ -40,6 +41,58 @@ class JobInputError(ValueError):
 # -- copy --------------------------------------------------------------------------
 
 
+def plan(call: CallContext) -> dict:
+    """Inspect both paths on the node selected to run the eventual copy."""
+    params = call.params
+    result = layout.build_owned(
+        params["source"], params["destination"], config.load(params.get("config_path")),
+        label=params.get("label"), read_probe=params.get("probe", True),
+    )
+    return {**result, "machine": call.machine}
+
+
+def _copy_item(
+    job: JobContext, plan: dict, item: dict, check_cancelled: Callable[[], None],
+) -> tuple[dict, int]:
+    source, dest = Path(item["source"]), Path(item["dest"])
+    if plan.get("mounts"):
+        layout.validate_mounts(plan)
+        layout.require_inside(source, Path(plan["source"]))
+        layout.require_inside(dest, Path(plan["destination"]))
+    if not source.is_file():
+        raise CopyError(f"source is not mounted: {source}")
+    info = source.stat()
+    if info.st_size != item["size"] or (item["mtime"] is not None and info.st_mtime != item["mtime"]):
+        raise CopyError(f"source changed since planning: {source}")
+
+    try:
+        if dest.exists() or dest.is_symlink():
+            raise FileExistsError(str(dest))
+        digest, size = copy_verified(source, dest, check_cancelled=check_cancelled)
+        skipped = False
+    except FileExistsError:
+        if dest.is_symlink() or not dest.is_file() or dest.stat().st_size != info.st_size:
+            raise CopyError(f"destination already exists with different contents: {dest}") from None
+        digest = hash_file(source, check_cancelled=check_cancelled)
+        if hash_file(dest, check_cancelled=check_cancelled) != digest:
+            raise CopyError(f"destination already exists with different contents: {dest}") from None
+        current = source.stat()
+        if (current.st_ino, current.st_size, current.st_mtime_ns) != (
+            info.st_ino, info.st_size, info.st_mtime_ns
+        ):
+            raise CopyError(f"source changed during verification: {source}")
+        size = info.st_size
+        skipped = True
+
+    registered = job.register_output(dest, role="transfer")
+    if registered != digest:
+        raise CopyError(f"{dest} verified as {digest} but park registered {registered}")
+    return {
+        "rel": item["rel"], "source": str(source), "dest": str(dest), "sha256": digest,
+        "size": size, "kind": item["kind"], "verified": True, "skipped": skipped,
+    }, 0 if skipped else size
+
+
 def copy(job: JobContext) -> dict:
     """Copy every item in a plan, verify each destination, and register it.
 
@@ -47,11 +100,34 @@ def copy(job: JobContext) -> dict:
     hash this handler did. A mismatch is reported in the receipt instead of being claimed
     as a file that landed, and the transfer ends partial or failed rather than ok.
     """
+    from park.machines.contract import JobCancelled
+    from park.node.client import NodeError
+    from park.ops import ParkError
+
+    def check_cancelled() -> None:
+        if job.cancelled():
+            raise JobCancelled("copy canceled")
+
     plan_id = str(job.params.get("plan") or "")
     transfer = str(job.params.get("transfer") or "")
     if not plan_id or not transfer:
         raise JobInputError("the copy job needs a plan and a transfer")
     plan = job.call("ferry.plan.get", {"id": plan_id})
+    owner = plan.get("machine")
+    if owner and (owner != job.machine or owner != job.params.get("machine")):
+        raise JobInputError(f"plan belongs to {owner}; refusing copy on {job.machine}")
+    current = job.call("ferry.transfer.get", {"id": transfer})
+    if not owner and current["job"]:
+        raise JobInputError("legacy transfer has no verified worker; plan it again before copying")
+    if current["plan"] != plan_id or (owner and current["job"] != job.job_id):
+        raise JobInputError("transfer does not belong to this job and plan")
+    if current["ended"]:
+        receipt = job.call("ferry.receipt.list", {"transfer": transfer, "limit": 1})[0]
+        return {
+            "transfer": transfer, "plan": plan_id, "status": receipt["status"],
+            "files": receipt["files"], "failed": len(receipt["errors"]),
+            "bytes": receipt["bytes"], "receipt": receipt["id"],
+        }
     items = plan.get("items") or []
     job.call(
         "ferry.transfer.start",
@@ -63,47 +139,37 @@ def copy(job: JobContext) -> dict:
     written = 0
     total = len(items)
     every = max(1, total // PROGRESS_STEPS)
-    for index, item in enumerate(items, start=1):
-        source = Path(item["source"])
-        dest = Path(item["dest"])
-        try:
-            if not source.is_file():
-                raise CopyError(f"source is not mounted: {source}")
-            skipped = item["action"] == layout.SKIP and dest.is_file()
-            if skipped:
-                digest = job.register_output(dest, role="transfer")
-                size = dest.stat().st_size
-            else:
-                digest, size = copy_verified(source, dest)
-                registered = job.register_output(dest, role="transfer")
-                if registered != digest:
-                    raise CopyError(f"{dest} verified as {digest} but park registered {registered}")
+    canceled = False
+    try:
+        layout.validate_mounts(plan)
+        for index, item in enumerate(items, start=1):
+            check_cancelled()
+            try:
+                result, size = _copy_item(job, plan, item, check_cancelled)
+                files.append(result)
                 written += size
-            files.append(
-                {
-                    "rel": item["rel"],
-                    "source": str(source),
-                    "dest": str(dest),
-                    "sha256": digest,
-                    "size": size,
-                    "verified": not skipped,
-                    "skipped": skipped,
-                }
-            )
-        except (CopyError, OSError) as exc:
-            errors.append(f"{item['rel']}: {exc}")
-            job.log(f"failed: {item['rel']}: {exc}")
-        if index % every == 0 or index == total:
-            job.progress(index / total if total else 1.0, f"{len(files)} of {total} files")
-            job.call(
-                "ferry.transfer.progress",
-                {
-                    "transfer": transfer,
-                    "done": index,
-                    "total": total,
-                    "note": f"{len(files)} copied, {len(errors)} failed",
-                },
-            )
+            except NodeError as exc:
+                errors.append(f"{item['rel']}: Park did not confirm registration: {exc}")
+                break
+            except (CopyError, OSError, ValueError) as exc:
+                errors.append(f"{item['rel']}: {exc}")
+                job.log(f"failed: {item['rel']}: {exc}")
+            if index % every == 0 or index == total:
+                job.progress(index / total, f"{len(files)} of {total} files")
+                job.call(
+                    "ferry.transfer.progress",
+                    {
+                        "transfer": transfer, "done": index, "total": total,
+                        "note": f"{len(files)} verified, {len(errors)} failed",
+                    },
+                )
+    except JobCancelled:
+        canceled = True
+        errors.append("Copy canceled before the remaining files were verified")
+    except NodeError as exc:
+        errors.append(f"Park did not confirm transfer progress: {exc}")
+    except (OSError, ValueError) as exc:
+        errors.append(str(exc))
 
     status = _status(files, errors)
     receipt = job.call(
@@ -118,10 +184,25 @@ def copy(job: JobContext) -> dict:
             "files": files,
             "errors": errors,
             "total_bytes": written,
-            "detail": {"label": plan.get("label"), "destination": plan.get("destination")},
+            "detail": {
+                "label": plan.get("label"), "destination": plan.get("destination"),
+                "canceled": canceled,
+            },
         },
     )
+    filing = None
+    if plan.get("project") and files:
+        try:
+            filed = job.call("ferry.receipt.file", {"id": receipt["id"]})
+            filing = {"attached": len(filed["attached"]), "pending": len(filed["pending"])}
+            if filed["errors"]:
+                filing["errors"] = filed["errors"]
+        except (NodeError, ParkError) as exc:
+            filing = {"error": str(exc)}
+            job.log(f"project filing unconfirmed for receipt {receipt['id']}: {exc}")
     job.log(f"transfer {transfer} {status}: {len(files)} files, {len(errors)} errors")
+    if canceled:
+        raise JobCancelled("copy canceled after recording verified work")
     return {
         "transfer": transfer,
         "plan": plan_id,
@@ -130,6 +211,7 @@ def copy(job: JobContext) -> dict:
         "failed": len(errors),
         "bytes": written,
         "receipt": receipt["id"],
+        **({"filing": filing} if filing is not None else {}),
     }
 
 

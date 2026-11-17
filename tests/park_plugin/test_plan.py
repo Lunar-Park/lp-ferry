@@ -123,6 +123,22 @@ def test_a_missing_source_is_not_found(call, tmp_path):
     assert "not there" in str(caught.value)
 
 
+def test_worker_planning_rejects_overwrite_while_local_planning_keeps_its_config(
+    call, card, tmp_path, worker_plan,
+):
+    config_path = tmp_path / "ferry.toml"
+    config_path.write_text('[organize]\non_conflict = "overwrite"\n', encoding="utf-8")
+    with pytest.raises(Exception, match="Set organize.on_conflict to 'skip' or 'rename'"):
+        worker_plan(config_path=str(config_path))
+    assert call("ferry.plan.list") == []
+
+    local = call("ferry.plan", {
+        "source": str(card.path), "destination": str(tmp_path / "offload"),
+        "config_path": str(config_path), "probe": False,
+    })
+    assert local["on_conflict"] == "overwrite"
+
+
 def test_an_empty_source_is_refused(call, tmp_path):
     empty = tmp_path / "empty-card"
     empty.mkdir()
