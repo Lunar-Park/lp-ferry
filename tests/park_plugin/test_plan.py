@@ -65,6 +65,50 @@ def test_the_plan_is_readable_after_it_is_written(call, card, tmp_path):
     assert [row["id"] for row in listed] == [plan["id"]]
 
 
+def test_reopening_a_v1_index_replays_existing_plans(tmp_path, card, monkeypatch):
+    from park.kernel import Park, index
+    from park.ops import invoke
+    from park.plugins import loader
+
+    from park_plugins.ferry import config, layout
+
+    loader.load_all()
+    old_schema = (Path(__file__).parent / "fixtures" / "ferry-plans-v1.sql").read_text()
+    home = tmp_path / "existing-home"
+    dest = tmp_path / "destination"
+    event_data = {
+        "id": "old-plan",
+        "created": "2026-11-16T12:00:00.000Z",
+        **layout.build(card.path, dest, config.Config(), read_probe=False),
+    }
+
+    def apply_old_plan(conn, event):
+        fields = ("id", "label", "source", "destination", "template", "on_conflict", "fingerprint", "created")
+        conn.execute(
+            "INSERT INTO ferry_plans (id, label, source, destination, template, on_conflict, fingerprint, created)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            tuple(event["data"][name] for name in fields),
+        )
+
+    with monkeypatch.context() as legacy:
+        legacy.setitem(index.SCHEMAS, "ferry.plans", old_schema)
+        legacy.setitem(index.APPLIERS, "ferry.plan.created", apply_old_plan)
+        old = Park(home)
+        try:
+            old.write("ferry.plan.created", event_data, actor="d")
+            assert old.one("SELECT id FROM ferry_plans")["id"] == "old-plan"
+        finally:
+            old.close()
+
+    upgraded = Park(home)
+    try:
+        stored = invoke(upgraded, "ferry.plan.get", {"id": "old-plan"}, actor="d")["result"]
+        assert stored["project"] is None and stored["machine"] is None
+        assert [item["rel"] for item in stored["items"]] == card.names
+    finally:
+        upgraded.close()
+
+
 def test_a_second_plan_against_a_filled_destination_skips(call, card, tmp_path):
     destination = tmp_path / "offload"
     first = call(

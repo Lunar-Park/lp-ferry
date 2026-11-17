@@ -36,7 +36,6 @@ CREATE TABLE IF NOT EXISTS ferry_plans (
     created TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ferry_plans_by_source ON ferry_plans (source, id);
-CREATE INDEX IF NOT EXISTS ferry_plans_by_project ON ferry_plans (project, id);
 CREATE TABLE IF NOT EXISTS ferry_plan_items (
     plan TEXT NOT NULL,
     rel TEXT NOT NULL,
