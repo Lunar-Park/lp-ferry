@@ -69,8 +69,8 @@ tui = []
 ferry = "file_ferry.cli:main"
 ferry-service = "file_ferry.service.cli:main"
 
-# The park plugin. `ferry` (the CLI above) stays as it is until the cutover;
-# park loads ops, jobs and the Ingest view from park_plugins/ferry.
+# Park optionally loads the adapter from this entry point. The standalone CLI and
+# desktop sidecar start without the Park host.
 [project.entry-points."park.plugins"]
 ferry = "park_plugins.ferry"
 

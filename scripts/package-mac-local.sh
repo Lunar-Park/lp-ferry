@@ -25,6 +25,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/desktop/build/electron-builder.yml"
 OVERLAY_DIR="$(mktemp -d)"
+trap 'rm -rf "$OVERLAY_DIR"' EXIT
 OVERLAY="$OVERLAY_DIR/electron-builder.local.yml"
 
 # Sed the release spec into unsigned form. Assert every substitution
@@ -73,4 +74,4 @@ open(path, "w").write(spec)
 PY
 
 export CSC_IDENTITY_AUTO_DISCOVERY=false
-./node_modules/.bin/electron-builder --mac --config "$OVERLAY"
+./node_modules/.bin/electron-builder --mac --config "$OVERLAY" --publish never

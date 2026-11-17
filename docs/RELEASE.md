@@ -57,14 +57,14 @@ pre-flight half. Run both.
 ## Validate a packaged build
 
 ```bash
-scripts/verify-packaged.sh release/mac-arm64/ferry.app
+scripts/verify-packaged.sh desktop/release/mac-arm64/ferry.app
 ```
 
 `scripts/verify-packaged.sh` asserts:
 - the frozen sidecar exists at `Contents/Resources/sidecar/`
   (the resource that must live **outside** `app.asar`),
 - the frozen sidecar launches and serves the JSON-RPC protocol
-  (`app.getCapabilities` round-trip),
+  (`app.getCapabilities` round-trip in a fresh, temporary database),
 - `app.asar` is present for main/preload/renderer.
 
 The renderer build is unpacked via `asarUnpack: dist/renderer/**` so the
