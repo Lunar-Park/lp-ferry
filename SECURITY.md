@@ -26,6 +26,30 @@ Everything else — bugs, packaging questions, feature requests — belongs in a
 public issue or a discussion. This section is only for things that should not
 be public yet.
 
+## Threat model — read this before you enable a node file server
+
+Ferry runs in two shapes, and they do not have the same exposure.
+
+**Standalone (the `ferry` CLI, the TUI, the desktop app) touches local disks only.** It opens your
+own files and a local SQLite database. It has no listening socket, no network client, and no
+credentials. Its security story is your OS user account and filesystem permissions.
+
+**As a Park plugin, `ferry.send` moves bytes between two machines over the network**, and that is
+the shape with a real, currently accepted weakness:
+
+- A node's file server accepts **any valid hub token**. Whoever holds one, plus the SHA-256 of a
+  file, can read that file from that server. There is no per-transfer grant and no per-file ACL.
+- Traffic is **plain HTTP**. Nothing in the send path is encrypted or authenticated beyond the
+  token, so the token is readable on the wire by anyone who can see the traffic.
+
+The intended deployment is a mesh VPN or a private LAN where every peer holding a node token is
+already trusted with that machine's media. **Do not expose a node file server to an untrusted
+network or to the public internet.** A hub-issued grant scoped to one transfer is the change that
+would lift this limit; until it exists, treat the file server as trusted-network-only.
+
+If you find a way to read a file with something less than a valid node token, to escape the
+landing folder, or to write into a source, that is exactly the kind of report this file is for.
+
 ## Secret scanning
 
 Live credentials, private keys, bearer values, recovery material, and
