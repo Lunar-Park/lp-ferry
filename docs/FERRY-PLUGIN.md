@@ -83,11 +83,12 @@ destination machine, and its items carry the hash the source computed in their `
 table changed. The receipt is a `copy` receipt whose `detail.send` names both machines, which is what
 `ferry.verify` and the Ingest view already read.
 
-Needs park's `fetch_asset(..., from_machine=)` (park branch `feat/direct-fetch`), the source machine's
+Needs a Park with `fetch_asset(..., from_machine=)`, the source machine's
 node file server on and reachable from the destination (`serve_files`, a `bind` address the destination
 can reach, a correct `advertise_url`), and Ferry loaded on both nodes. A send never deletes the source.
 Not yet: a grant scoped to one transfer (today any valid node token can fetch a file by hash from a
-file server), a pre-check of the destination before the source is hashed, and Windows destinations.
+file server; the traffic is plain HTTP, so enable a file server only on a network you control — see
+`SECURITY.md`), a pre-check of the destination before the source is hashed, and Windows destinations.
 
 ## `ferry.toml`
 

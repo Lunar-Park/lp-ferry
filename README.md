@@ -21,6 +21,12 @@ For project-bound plans, verified media is filed as project sources after the co
 is saved. Filing failure leaves the verified copy intact. `ferry.receipt.file` (also Park's
 **Retry project filing**) repairs attachment from that receipt without copying again.
 
+`ferry.send` moves a folder from one machine's disk to another's directly — the hub introduces the
+two machines and keeps the receipt, no byte is staged in between — with every file hashed at both
+ends. It needs a file server on the source machine, which today accepts any valid node token over
+plain HTTP: enable it only on a network you control. [How it works, and what it does not
+guarantee yet](docs/MACHINE-TO-MACHINE-SEND.md) · [threat model](SECURITY.md#threat-model--read-this-before-you-enable-a-node-file-server).
+
 [![Version](https://img.shields.io/badge/version-0.3.0-blue)](https://github.com/Lunar-Park/lp-ferry)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
