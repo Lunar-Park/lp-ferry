@@ -48,6 +48,19 @@ jobs:
       - name: Test with pytest
         run: pytest --cov=file_ferry --cov-report=term-missing
 
+      # tests/park_plugin needs park importable, and park is a separate host
+      # rather than a dependency of this package. Each of those modules skips
+      # on import, which means pytest collects *zero items* from them: the
+      # run is green and the send tests (ferry.send/stage/land) were never
+      # attempted. Count them so the gap is visible in the log instead of
+      # looking like coverage. Do not turn this into a pass/fail on park's
+      # availability; run the suite with park on PYTHONPATH to prove it.
+      - name: Report the Park plugin suite this run did not exercise
+        run: |
+          count=$(grep -rhoE "^[[:space:]]*def test_" tests/park_plugin | wc -l | tr -d ' ')
+          echo "::warning title=Park plugin tests not run::$count park plugin test functions (the machine-to-machine send included) did not run in this job: park is not installed."
+          echo "park plugin test functions: $count; attempted by pytest this run: 0"
+
   # macOS leg of the Python suite. The package classifies itself
   # MacOS/POSIX and the operators who run ferry work on macOS, but CI only
   # ever proved the suite on Linux — and the codebase has real
