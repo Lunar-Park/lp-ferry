@@ -45,14 +45,20 @@ def plan(call: CallContext) -> dict:
     """Inspect both paths on the node selected to run the eventual copy."""
     params = call.params
     result = layout.build_owned(
-        params["source"], params["destination"], config.load(params.get("config_path")),
-        label=params.get("label"), read_probe=params.get("probe", True),
+        params["source"],
+        params["destination"],
+        config.load(params.get("config_path")),
+        label=params.get("label"),
+        read_probe=params.get("probe", True),
     )
     return {**result, "machine": call.machine}
 
 
 def _copy_item(
-    job: JobContext, plan: dict, item: dict, check_cancelled: Callable[[], None],
+    job: JobContext,
+    plan: dict,
+    item: dict,
+    check_cancelled: Callable[[], None],
 ) -> tuple[dict, int]:
     source, dest = Path(item["source"]), Path(item["dest"])
     if plan.get("mounts"):
@@ -62,7 +68,9 @@ def _copy_item(
     if not source.is_file():
         raise CopyError(f"source is not mounted: {source}")
     info = source.stat()
-    if info.st_size != item["size"] or (item["mtime"] is not None and info.st_mtime != item["mtime"]):
+    if info.st_size != item["size"] or (
+        item["mtime"] is not None and info.st_mtime != item["mtime"]
+    ):
         raise CopyError(f"source changed since planning: {source}")
 
     try:
@@ -78,9 +86,11 @@ def _copy_item(
             raise CopyError(f"destination already exists with different contents: {dest}") from None
         current = source.stat()
         if (current.st_ino, current.st_size, current.st_mtime_ns) != (
-            info.st_ino, info.st_size, info.st_mtime_ns
+            info.st_ino,
+            info.st_size,
+            info.st_mtime_ns,
         ):
-            raise CopyError(f"source changed during verification: {source}")
+            raise CopyError(f"source changed during verification: {source}") from None
         size = info.st_size
         skipped = True
 
@@ -88,8 +98,14 @@ def _copy_item(
     if registered != digest:
         raise CopyError(f"{dest} verified as {digest} but park registered {registered}")
     return {
-        "rel": item["rel"], "source": str(source), "dest": str(dest), "sha256": digest,
-        "size": size, "kind": item["kind"], "verified": True, "skipped": skipped,
+        "rel": item["rel"],
+        "source": str(source),
+        "dest": str(dest),
+        "sha256": digest,
+        "size": size,
+        "kind": item["kind"],
+        "verified": True,
+        "skipped": skipped,
     }, 0 if skipped else size
 
 
@@ -124,9 +140,13 @@ def copy(job: JobContext) -> dict:
     if current["ended"]:
         receipt = job.call("ferry.receipt.list", {"transfer": transfer, "limit": 1})[0]
         return {
-            "transfer": transfer, "plan": plan_id, "status": receipt["status"],
-            "files": receipt["files"], "failed": len(receipt["errors"]),
-            "bytes": receipt["bytes"], "receipt": receipt["id"],
+            "transfer": transfer,
+            "plan": plan_id,
+            "status": receipt["status"],
+            "files": receipt["files"],
+            "failed": len(receipt["errors"]),
+            "bytes": receipt["bytes"],
+            "receipt": receipt["id"],
         }
     items = plan.get("items") or []
     job.call(
@@ -159,7 +179,9 @@ def copy(job: JobContext) -> dict:
                 job.call(
                     "ferry.transfer.progress",
                     {
-                        "transfer": transfer, "done": index, "total": total,
+                        "transfer": transfer,
+                        "done": index,
+                        "total": total,
                         "note": f"{len(files)} verified, {len(errors)} failed",
                     },
                 )
@@ -185,7 +207,8 @@ def copy(job: JobContext) -> dict:
             "errors": errors,
             "total_bytes": written,
             "detail": {
-                "label": plan.get("label"), "destination": plan.get("destination"),
+                "label": plan.get("label"),
+                "destination": plan.get("destination"),
                 "canceled": canceled,
             },
         },
@@ -229,7 +252,13 @@ def _fail_send(job: JobContext, transfer: str, errors: list[str]) -> dict:
         job.log(f"could not record the failure of transfer {transfer}: {exc}")
     for line in errors:
         job.log(f"send failed: {line}")
-    return {"transfer": transfer, "status": "failed", "files": 0, "failed": len(errors), "errors": errors}
+    return {
+        "transfer": transfer,
+        "status": "failed",
+        "files": 0,
+        "failed": len(errors),
+        "errors": errors,
+    }
 
 
 def stage(job: JobContext) -> dict:
@@ -263,15 +292,25 @@ def stage(job: JobContext) -> dict:
             except OSError as exc:
                 return _fail_send(job, transfer, [f"{file.rel}: cannot read it: {exc}"])
             items.append(
-                {"rel": file.rel, "source": str(file.path), "size": file.size, "mtime": file.mtime,
-                 "kind": file.kind, "sha256": digest}
+                {
+                    "rel": file.rel,
+                    "source": str(file.path),
+                    "size": file.size,
+                    "mtime": file.mtime,
+                    "kind": file.kind,
+                    "sha256": digest,
+                }
             )
             if index % every == 0 or index == total:
                 job.progress(index / total, f"hashed {index} of {total} files")
                 job.call(
                     "ferry.transfer.progress",
-                    {"transfer": transfer, "done": index, "total": total,
-                     "note": f"hashing the source on {job.machine}: {index} of {total}"},
+                    {
+                        "transfer": transfer,
+                        "done": index,
+                        "total": total,
+                        "note": f"hashing the source on {job.machine}: {index} of {total}",
+                    },
                 )
     except JobCancelled:
         _fail_send(job, transfer, ["canceled while staging; nothing was copied"])
@@ -292,9 +331,16 @@ def stage(job: JobContext) -> dict:
             "items": items,
         },
     )
-    job.log(f"transfer {transfer}: {len(items)} files staged on {job.machine}; landing job {landing['job']}")
-    return {"transfer": transfer, "plan": landing["plan"], "land_job": landing["job"],
-            "files": len(items), "bytes": sum(item["size"] for item in items)}
+    job.log(
+        f"transfer {transfer}: {len(items)} files staged on {job.machine}; landing job {landing['job']}"
+    )
+    return {
+        "transfer": transfer,
+        "plan": landing["plan"],
+        "land_job": landing["job"],
+        "files": len(items),
+        "bytes": sum(item["size"] for item in items),
+    }
 
 
 def land(job: JobContext) -> dict:
@@ -320,21 +366,34 @@ def land(job: JobContext) -> dict:
     transfer = str(job.params.get("transfer") or "")
     source_machine = str(job.params.get("source_machine") or "")
     if not plan_id or not transfer or not source_machine:
-        raise JobInputError("the land job needs a plan, a transfer and the machine to take the files from")
+        raise JobInputError(
+            "the land job needs a plan, a transfer and the machine to take the files from"
+        )
     plan = job.call("ferry.plan.get", {"id": plan_id})
     if plan.get("machine") != job.machine or plan.get("machine") != job.params.get("machine"):
-        raise JobInputError(f"plan belongs to {plan.get('machine')}; refusing to land on {job.machine}")
+        raise JobInputError(
+            f"plan belongs to {plan.get('machine')}; refusing to land on {job.machine}"
+        )
     current = job.call("ferry.transfer.get", {"id": transfer})
     if current["plan"] != plan_id or current["job"] != job.job_id:
         raise JobInputError("transfer does not belong to this job and plan")
     if current["ended"]:
         receipt = job.call("ferry.receipt.list", {"transfer": transfer, "limit": 1})[0]
-        return {"transfer": transfer, "plan": plan_id, "status": receipt["status"], "files": receipt["files"],
-                "failed": len(receipt["errors"]), "bytes": receipt["bytes"], "receipt": receipt["id"]}
+        return {
+            "transfer": transfer,
+            "plan": plan_id,
+            "status": receipt["status"],
+            "files": receipt["files"],
+            "failed": len(receipt["errors"]),
+            "bytes": receipt["bytes"],
+            "receipt": receipt["id"],
+        }
 
     items = plan.get("items") or []
     destination = Path(plan["destination"])
-    job.call("ferry.transfer.start", {"transfer": transfer, "job": job.job_id, "machine": job.machine})
+    job.call(
+        "ferry.transfer.start", {"transfer": transfer, "job": job.job_id, "machine": job.machine}
+    )
 
     files: list[dict] = []
     errors: list[str] = []
@@ -349,7 +408,9 @@ def land(job: JobContext) -> dict:
         probe.unlink()
         free = shutil.disk_usage(destination).free
         if free < plan["bytes"]:
-            raise OSError(f"not enough space on {job.machine} for {destination}: needs {plan['bytes']} bytes, {free} free")
+            raise OSError(
+                f"not enough space on {job.machine} for {destination}: needs {plan['bytes']} bytes, {free} free"
+            )
         for index, item in enumerate(items, start=1):
             check_cancelled()
             try:
@@ -366,8 +427,12 @@ def land(job: JobContext) -> dict:
                 job.progress(index / total, f"{len(files)} of {total} files")
                 job.call(
                     "ferry.transfer.progress",
-                    {"transfer": transfer, "done": index, "total": total,
-                     "note": f"{len(files)} verified, {len(errors)} failed"},
+                    {
+                        "transfer": transfer,
+                        "done": index,
+                        "total": total,
+                        "note": f"{len(files)} verified, {len(errors)} failed",
+                    },
                 )
     except JobCancelled:
         canceled = True
@@ -379,12 +444,25 @@ def land(job: JobContext) -> dict:
     receipt = job.call(
         "ferry.receipt.record",
         {
-            "kind": "copy", "status": status, "transfer": transfer, "plan": plan_id, "job": job.job_id,
-            "machine": job.machine, "files": files, "errors": errors, "total_bytes": written,
+            "kind": "copy",
+            "status": status,
+            "transfer": transfer,
+            "plan": plan_id,
+            "job": job.job_id,
+            "machine": job.machine,
+            "files": files,
+            "errors": errors,
+            "total_bytes": written,
             "detail": {
-                "label": plan.get("label"), "destination": plan.get("destination"), "canceled": canceled,
-                "send": {"source_machine": source_machine, "source": plan.get("source"),
-                         "destination_machine": job.machine, "destination": plan.get("destination")},
+                "label": plan.get("label"),
+                "destination": plan.get("destination"),
+                "canceled": canceled,
+                "send": {
+                    "source_machine": source_machine,
+                    "source": plan.get("source"),
+                    "destination_machine": job.machine,
+                    "destination": plan.get("destination"),
+                },
             },
         },
     )
@@ -398,14 +476,26 @@ def land(job: JobContext) -> dict:
         except (NodeError, ParkError) as exc:
             filing = {"error": str(exc)}
             job.log(f"project filing unconfirmed for receipt {receipt['id']}: {exc}")
-    job.log(f"transfer {transfer} {status}: {len(files)} files from {source_machine}, {len(errors)} errors")
+    job.log(
+        f"transfer {transfer} {status}: {len(files)} files from {source_machine}, {len(errors)} errors"
+    )
     if canceled:
         raise JobCancelled("send canceled after recording verified work")
-    return {"transfer": transfer, "plan": plan_id, "status": status, "files": len(files), "failed": len(errors),
-            "bytes": written, "receipt": receipt["id"], **({"filing": filing} if filing is not None else {})}
+    return {
+        "transfer": transfer,
+        "plan": plan_id,
+        "status": status,
+        "files": len(files),
+        "failed": len(errors),
+        "bytes": written,
+        "receipt": receipt["id"],
+        **({"filing": filing} if filing is not None else {}),
+    }
 
 
-def _land_item(job: JobContext, plan: dict, item: dict, source_machine: str, check_cancelled) -> tuple[dict, int]:
+def _land_item(
+    job: JobContext, plan: dict, item: dict, source_machine: str, check_cancelled
+) -> tuple[dict, int]:
     dest = Path(item["dest"])
     layout.require_inside(dest, Path(plan["destination"]))
     expected = str((item.get("probe") or {}).get("sha256") or "")
@@ -426,8 +516,14 @@ def _land_item(job: JobContext, plan: dict, item: dict, source_machine: str, che
         dest.unlink(missing_ok=True)
         raise CopyError(f"{dest} arrived as {registered}, not the {expected} the source hashed")
     return {
-        "rel": item["rel"], "source": item["source"], "dest": str(dest), "sha256": expected,
-        "size": item["size"], "kind": item["kind"], "verified": True, "skipped": skipped,
+        "rel": item["rel"],
+        "source": item["source"],
+        "dest": str(dest),
+        "sha256": expected,
+        "size": item["size"],
+        "kind": item["kind"],
+        "verified": True,
+        "skipped": skipped,
     }, 0 if skipped else item["size"]
 
 
@@ -762,8 +858,6 @@ def _status(files: list[dict], errors: list[str]) -> str:
 
 __all__ = [
     "JobInputError",
-    "land",
-    "stage",
     "ProxyError",
     "ResolveError",
     "build_manifest",
@@ -772,6 +866,8 @@ __all__ = [
     "encode",
     "find_ffmpeg",
     "find_resolve",
+    "land",
     "proxy",
     "resolve",
+    "stage",
 ]

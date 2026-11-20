@@ -122,7 +122,6 @@ def worker_plan(park, call, card, tmp_path):
     """The real broker offers planning to a simulated worker with the fixture card."""
     from park.machines import calls
     from park.machines.contract import LocalCallContext
-
     from park_plugins.ferry import jobs
 
     owner = call("machines.register", {"name": "Ferry Worker", "id": "worker-a"})
@@ -135,15 +134,24 @@ def worker_plan(park, call, card, tmp_path):
 
     def build(**extra):
         with ThreadPoolExecutor(max_workers=1) as pool:
-            reply = pool.submit(call, "ferry.plan", {
-                "machine": owner["name"], "source": str(card.path),
-                "destination": str(destination), "probe": False, **extra,
-            })
+            reply = pool.submit(
+                call,
+                "ferry.plan",
+                {
+                    "machine": owner["name"],
+                    "source": str(card.path),
+                    "destination": str(destination),
+                    "probe": False,
+                    **extra,
+                },
+            )
             try:
                 assert broker.poll(other_row, wait=0.05, plugins=["ferry"]) is None
                 offered = broker.poll(owner_row, wait=2, plugins=["ferry"])
                 assert offered and offered["name"] == "plan"
-                ctx = LocalCallContext(park, "ferry", "plan", offered["params"], tmp_path, machine=owner["id"])
+                ctx = LocalCallContext(
+                    park, "ferry", "plan", offered["params"], tmp_path, machine=owner["id"]
+                )
                 try:
                     result = jobs.plan(ctx)
                 except (OSError, ValueError) as exc:

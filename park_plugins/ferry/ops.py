@@ -176,10 +176,15 @@ def ferry_plan(
     if machine:
         owner = ctx.call("machines.get", {"machine": machine})["id"]
         plan = ctx.node_call(
-            "ferry.plan", {
-                "source": source, "destination": destination, "label": label,
-                "config_path": config_path, "probe": probe,
-            }, machine=owner,
+            "ferry.plan",
+            {
+                "source": source,
+                "destination": destination,
+                "label": label,
+                "config_path": config_path,
+                "probe": probe,
+            },
+            machine=owner,
         )
         if plan.get("machine") != owner or not plan.get("mounts"):
             raise Conflict("the selected worker did not confirm both folders")
@@ -192,7 +197,9 @@ def ferry_plan(
     plan_id = ids.new_id()
     created = _now()
     result = {
-        "id": plan_id, "created": created, **plan,
+        "id": plan_id,
+        "created": created,
+        **plan,
         "project": scope["id"] if scope else None,
         "project_slug": scope["slug"] if scope else None,
     }
@@ -344,7 +351,9 @@ def _offload_row(
         errors = transfer["errors"]
         if not receipt and transfer["job_status"] in ("done", "failed", "canceled"):
             state = "canceled" if transfer["job_status"] == "canceled" else "failed"
-            errors = errors or [transfer["job_error"] or f"Copy job {state} before it wrote a receipt"]
+            errors = errors or [
+                transfer["job_error"] or f"Copy job {state} before it wrote a receipt"
+            ]
         row.update(
             {
                 "state": state,
@@ -429,9 +438,13 @@ def ferry_ingest_list(
         here = mounted.get((plan["source"], plan["machine"]))
         rows.append(_offload_row(plan, newest, receipt, len(ran), here))
 
-    extra = [] if project_id else ctx.all(
-        "SELECT * FROM ferry_receipts WHERE kind != 'copy' ORDER BY created DESC, id DESC LIMIT ?",
-        (limit,),
+    extra = (
+        []
+        if project_id
+        else ctx.all(
+            "SELECT * FROM ferry_receipts WHERE kind != 'copy' ORDER BY created DESC, id DESC LIMIT ?",
+            (limit,),
+        )
     )
     for row in extra:
         summary = records.receipt_summary(row)
@@ -503,17 +516,28 @@ def ferry_offload(
     if owner:
         machine = owner
         current = ctx.one(
-            f"{TRANSFER_READ} WHERE f.plan=? ORDER BY f.id DESC LIMIT 1", (plan,),
+            f"{TRANSFER_READ} WHERE f.plan=? ORDER BY f.id DESC LIMIT 1",
+            (plan,),
         )
-        if current and current["job"] and (
-            current["status"] == "copied" or (
-                current["status"] in ("queued", "running")
-                and current["job_status"] not in ("done", "failed", "canceled")
+        if (
+            current
+            and current["job"]
+            and (
+                current["status"] == "copied"
+                or (
+                    current["status"] in ("queued", "running")
+                    and current["job_status"] not in ("done", "failed", "canceled")
+                )
             )
         ):
             return {
-                "plan": plan, "transfer": current["id"], "job": current["job"],
-                "machine": owner, "queued": True, "files": row["files"], "bytes": row["bytes"],
+                "plan": plan,
+                "transfer": current["id"],
+                "job": current["job"],
+                "machine": owner,
+                "queued": True,
+                "files": row["files"],
+                "bytes": row["bytes"],
             }
     transfer = ids.new_id()
     params = {"plan": plan, "transfer": transfer}
@@ -590,10 +614,14 @@ def ferry_send(
     scope = ctx.call("project.get", {"project": project}) if project else None
     transfer = ids.new_id()
     job_id, queued = _submit(
-        ctx, "stage",
+        ctx,
+        "stage",
         {
-            "transfer": transfer, "source": root, "destination": target,
-            "destination_machine": landing["id"], "label": label or posixpath.basename(root),
+            "transfer": transfer,
+            "source": root,
+            "destination": target,
+            "destination_machine": landing["id"],
+            "label": label or posixpath.basename(root),
             "project": scope["id"] if scope else None,
         },
         origin["id"],
@@ -602,11 +630,21 @@ def ferry_send(
         raise Unavailable("Park did not accept the stage job")
     ctx.write(
         "ferry.transfer.queued",
-        {"id": transfer, "plan": "", "job": job_id, "machine": origin["id"], "total": 0, "queued": _now()},
+        {
+            "id": transfer,
+            "plan": "",
+            "job": job_id,
+            "machine": origin["id"],
+            "total": 0,
+            "queued": _now(),
+        },
     )
     return {
-        "transfer": transfer, "job": job_id, "source_machine": origin["id"],
-        "destination_machine": landing["id"], "queued": True,
+        "transfer": transfer,
+        "job": job_id,
+        "source_machine": origin["id"],
+        "destination_machine": landing["id"],
+        "queued": True,
     }
 
 
@@ -649,9 +687,13 @@ def ferry_send_land(
             raise Invalid(f"file {item.get('rel')!r} needs a non-negative size")
         rows.append(
             {
-                "rel": str(item["rel"]), "source": str(item.get("source") or ""),
-                "dest": _landing_path(target, item["rel"]), "size": size,
-                "mtime": item.get("mtime"), "kind": str(item.get("kind") or ""), "action": layout.COPY,
+                "rel": str(item["rel"]),
+                "source": str(item.get("source") or ""),
+                "dest": _landing_path(target, item["rel"]),
+                "size": size,
+                "mtime": item.get("mtime"),
+                "kind": str(item.get("kind") or ""),
+                "action": layout.COPY,
                 # A send plan keeps the hash the source machine computed in the item's probe, because
                 # that is the one fact a landing is checked against and no column holds it.
                 "probe": {"sha256": digest},
@@ -665,22 +707,44 @@ def ferry_send_land(
     for row in rows:
         by_kind[row["kind"]] = by_kind.get(row["kind"], 0) + 1
     plan = {
-        "id": plan_id, "created": _now(), "label": label or posixpath.basename(root),
-        "source": root, "destination": target, "template": "{root}/{source_relpath}",
-        "on_conflict": "skip", "fingerprint": layout.fingerprint(rows), "files": len(rows),
-        "copies": len(rows), "skips": 0, "bytes": sum(row["size"] for row in rows), "by_kind": by_kind,
-        "machine": landing, "mounts": None, "items": rows,
-        "project": scope["id"] if scope else None, "project_slug": scope["slug"] if scope else None,
+        "id": plan_id,
+        "created": _now(),
+        "label": label or posixpath.basename(root),
+        "source": root,
+        "destination": target,
+        "template": "{root}/{source_relpath}",
+        "on_conflict": "skip",
+        "fingerprint": layout.fingerprint(rows),
+        "files": len(rows),
+        "copies": len(rows),
+        "skips": 0,
+        "bytes": sum(row["size"] for row in rows),
+        "by_kind": by_kind,
+        "machine": landing,
+        "mounts": None,
+        "items": rows,
+        "project": scope["id"] if scope else None,
+        "project_slug": scope["slug"] if scope else None,
     }
     ctx.write("ferry.plan.created", plan, project=plan["project"])
     job_id, queued = _submit(
-        ctx, "land", {"plan": plan_id, "transfer": transfer, "machine": landing, "source_machine": origin}, landing
+        ctx,
+        "land",
+        {"plan": plan_id, "transfer": transfer, "machine": landing, "source_machine": origin},
+        landing,
     )
     if not queued:
         raise Unavailable("Park did not accept the land job")
     ctx.write(
         "ferry.transfer.queued",
-        {"id": transfer, "plan": plan_id, "job": job_id, "machine": landing, "total": len(rows), "queued": _now()},
+        {
+            "id": transfer,
+            "plan": plan_id,
+            "job": job_id,
+            "machine": landing,
+            "total": len(rows),
+            "queued": _now(),
+        },
     )
     return {"plan": plan_id, "transfer": transfer, "job": job_id, "machine": landing}
 
@@ -704,8 +768,18 @@ def ferry_send_fail(
     problems = [str(line) for line in errors] or ["the send failed"]
     ctx.write(
         "ferry.transfer.finished",
-        {"id": transfer, "status": TRANSFER_STATUS["failed"], "files": 0, "verified": 0, "skipped": 0,
-         "failed": len(problems), "bytes": 0, "errors": problems, "digest": None, "ended": _now()},
+        {
+            "id": transfer,
+            "status": TRANSFER_STATUS["failed"],
+            "files": 0,
+            "verified": 0,
+            "skipped": 0,
+            "failed": len(problems),
+            "bytes": 0,
+            "errors": problems,
+            "digest": None,
+            "ended": _now(),
+        },
     )
     return {"transfer": transfer}
 
@@ -885,19 +959,26 @@ def _verified_hashes(receipt: dict) -> list[str]:
 def _filing(ctx: OpContext, plan: dict, receipt: dict) -> dict:
     verified = _verified_hashes(receipt)
     attached = {
-        row["sha256"] for row in ctx.all(
+        row["sha256"]
+        for row in ctx.all(
             "SELECT sha256 FROM project_assets WHERE project=? AND role=?",
             (plan["project"], SOURCE_ROLE),
         )
     }
     return {
-        "project": plan["project"], "project_slug": plan["project_slug"], "role": SOURCE_ROLE,
+        "project": plan["project"],
+        "project_slug": plan["project_slug"],
+        "role": SOURCE_ROLE,
         "attached": [sha for sha in verified if sha in attached],
         "pending": [sha for sha in verified if sha not in attached],
     }
 
 
-@_op("ferry.receipt.file", summary="File the receipt's verified media as project sources.", effect="write")
+@_op(
+    "ferry.receipt.file",
+    summary="File the receipt's verified media as project sources.",
+    effect="write",
+)
 def ferry_receipt_file(ctx: OpContext, id: Annotated[str, "Copy receipt id"]) -> dict:
     """File the verified hashes in their originating project. Safe to repair or repeat."""
     receipt = ferry_receipt_get(ctx, id)
@@ -907,9 +988,14 @@ def ferry_receipt_file(ctx: OpContext, id: Annotated[str, "Copy receipt id"]) ->
     errors = []
     for digest in filing["pending"]:
         try:
-            ctx.call("project.attach_asset", {
-                "project": filing["project"], "sha256": digest, "role": SOURCE_ROLE,
-            })
+            ctx.call(
+                "project.attach_asset",
+                {
+                    "project": filing["project"],
+                    "sha256": digest,
+                    "role": SOURCE_ROLE,
+                },
+            )
         except NotFound as exc:
             errors.append({"sha256": digest, "message": str(exc)})
     return {**_filing(ctx, _plan_row(ctx, receipt["plan"]), receipt), "errors": errors}

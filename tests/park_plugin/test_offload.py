@@ -213,7 +213,11 @@ def test_a_skipped_file_is_registered_where_it_already_is(call, card, tmp_path, 
 
 @pytest.mark.parametrize("present_at_plan", [False, True])
 def test_changed_destination_is_never_overwritten_or_counted_as_verified(
-    call, card, tmp_path, job_context, present_at_plan,
+    call,
+    card,
+    tmp_path,
+    job_context,
+    present_at_plan,
 ):
     dest = tmp_path / "offload"
     file = dest / "notes.txt"
@@ -234,7 +238,9 @@ def test_changed_destination_is_never_overwritten_or_counted_as_verified(
     assert any("already exists with different contents" in error for error in receipt["errors"])
 
 
-def test_a_canceled_copy_keeps_its_verified_partial_receipt(call, card, tmp_path, job_context, monkeypatch):
+def test_a_canceled_copy_keeps_its_verified_partial_receipt(
+    call, card, tmp_path, job_context, monkeypatch
+):
     from park.machines.contract import JobCancelled
 
     plan = _plan(call, card, tmp_path / "offload")
@@ -251,7 +257,12 @@ def test_a_canceled_copy_keeps_its_verified_partial_receipt(call, card, tmp_path
 
 @pytest.mark.parametrize("operation", ["registration", "transfer progress"])
 def test_a_node_failure_keeps_earlier_verified_files_in_the_receipt(
-    call, card, tmp_path, job_context, monkeypatch, operation,
+    call,
+    card,
+    tmp_path,
+    job_context,
+    monkeypatch,
+    operation,
 ):
     from park.node.client import NodeError
 

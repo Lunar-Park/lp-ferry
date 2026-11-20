@@ -69,7 +69,9 @@ def copy_verified(
             os.link(staged_path, dest)
         except OSError as exc:
             if exc.errno in (errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOSYS):
-                raise CopyError(f"destination does not support safe no-replace publication: {dest.parent}") from exc
+                raise CopyError(
+                    f"destination does not support safe no-replace publication: {dest.parent}"
+                ) from exc
             raise
     except FileExistsError:
         raise

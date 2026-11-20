@@ -16,18 +16,17 @@ import pytest
 
 pytest.importorskip("park", reason="park is not installed")
 
-from park.machines.contract import LocalJobContext  # noqa: E402
-from park.node.client import Client, NodeError  # noqa: E402
-from park.ops import REGISTRY, op  # noqa: E402
+from park.machines.contract import LocalJobContext
+from park.node.client import Client, NodeError
+from park.ops import REGISTRY, op
 
 if not hasattr(Client, "download_from"):  # pragma: no cover - an older park
     pytest.skip("needs park's direct fetch (fetch_asset from_machine)", allow_module_level=True)
 
-from park.node.files_service import FileServer  # noqa: E402
-from park.node.worker import fetch_asset  # noqa: E402
-
-from park_plugins.ferry import jobs  # noqa: E402
-from park_plugins.ferry.copy import hash_file  # noqa: E402
+from park.node.files_service import FileServer
+from park.node.worker import fetch_asset
+from park_plugins.ferry import jobs
+from park_plugins.ferry.copy import hash_file
 
 TOKEN = "node-token"
 
@@ -59,7 +58,9 @@ class LandContext(LocalJobContext):
     hub: Hub
 
     def fetch_asset(self, sha256, dest=None, *, from_machine=None):
-        return fetch_asset(self.hub, self.machine, self.workdir, sha256, dest, from_machine=from_machine)
+        return fetch_asset(
+            self.hub, self.machine, self.workdir, sha256, dest, from_machine=from_machine
+        )
 
 
 @pytest.fixture
@@ -89,7 +90,10 @@ def machines(call):
 @pytest.fixture
 def source_server(card):
     """node-a's file server, serving the card's files by hash."""
-    files = {hashlib.sha256((card.path / rel).read_bytes()).hexdigest(): card.path / rel for rel in card.names}
+    files = {
+        hashlib.sha256((card.path / rel).read_bytes()).hexdigest(): card.path / rel
+        for rel in card.names
+    }
     settings = types.SimpleNamespace(name="node-a", port=0, allow_unauthenticated_files=False)
     server = FileServer(settings, Hub(files=files), bind="127.0.0.1", port=0)
     server.start()
@@ -100,26 +104,48 @@ def source_server(card):
 def send(call, card, tmp_path, **extra):
     return call(
         "ferry.send",
-        {"source_machine": "node-a", "source": str(card.path), "destination_machine": "node-b",
-         "destination": str(tmp_path / "ssd-b" / "ingest"), **extra},
+        {
+            "source_machine": "node-a",
+            "source": str(card.path),
+            "destination_machine": "node-b",
+            "destination": str(tmp_path / "ssd-b" / "ingest"),
+            **extra,
+        },
     )
 
 
 def stage_context(park, submission, tmp_path):
-    return LocalJobContext(park, plugin="ferry", name="stage", params=submission["params"],
-                           workdir=tmp_path / "work-a", machine="node-a")
+    return LocalJobContext(
+        park,
+        plugin="ferry",
+        name="stage",
+        params=submission["params"],
+        workdir=tmp_path / "work-a",
+        machine="node-a",
+    )
 
 
 def land_context(park, submission, tmp_path, source_server):
     (tmp_path / "work-b").mkdir(exist_ok=True)
-    context = LandContext(park, plugin="ferry", name="land", params=submission["params"],
-                          workdir=tmp_path / "work-b", machine="node-b", job_id="job-2")
+    context = LandContext(
+        park,
+        plugin="ferry",
+        name="land",
+        params=submission["params"],
+        workdir=tmp_path / "work-b",
+        machine="node-b",
+        job_id="job-2",
+    )
     context.hub = Hub(url=source_server.url, files=source_server.files)
     return context
 
 
 def snapshot(root: Path) -> dict:
-    return {str(p.relative_to(root)): (p.read_bytes(), p.stat().st_mtime_ns) for p in sorted(root.rglob("*")) if p.is_file()}
+    return {
+        str(p.relative_to(root)): (p.read_bytes(), p.stat().st_mtime_ns)
+        for p in sorted(root.rglob("*"))
+        if p.is_file()
+    }
 
 
 # -- queueing -----------------------------------------------------------------------
@@ -133,7 +159,12 @@ def test_send_queues_the_stage_job_on_the_source_machine(call, card, tmp_path, m
     assert submitted[0]["params"]["destination_machine"] == "node-b"
     assert submitted[0]["params"]["label"] == "Card A to SSD B"
     row = call("ferry.transfer.get", {"id": sent["transfer"]})
-    assert (row["status"], row["job"], row["machine"], row["plan"]) == ("queued", "job-1", "node-a", "")
+    assert (row["status"], row["job"], row["machine"], row["plan"]) == (
+        "queued",
+        "job-1",
+        "node-a",
+        "",
+    )
 
 
 @pytest.mark.parametrize(
@@ -167,13 +198,22 @@ def test_a_send_lands_every_file_verified_and_never_touches_the_source(
     before = snapshot(card.path)
     sent = send(call, card, tmp_path)
     staged = jobs.stage(stage_context(park, submitted[0], tmp_path))
-    assert snapshot(card.path) == before  # staging hashes in place: nothing written, nothing touched
+    assert (
+        snapshot(card.path) == before
+    )  # staging hashes in place: nothing written, nothing touched
     assert staged["files"] == len(card.names) and staged["bytes"] == card.total_bytes
 
     # Staging queued the landing on the other machine, and the plan belongs to it.
-    assert [(c["name"], c["machine"]) for c in submitted] == [("stage", "node-a"), ("land", "node-b")]
-    assert submitted[1]["params"] == {"plan": staged["plan"], "transfer": sent["transfer"],
-                                      "machine": "node-b", "source_machine": "node-a"}
+    assert [(c["name"], c["machine"]) for c in submitted] == [
+        ("stage", "node-a"),
+        ("land", "node-b"),
+    ]
+    assert submitted[1]["params"] == {
+        "plan": staged["plan"],
+        "transfer": sent["transfer"],
+        "machine": "node-b",
+        "source_machine": "node-a",
+    }
     plan = call("ferry.plan.get", {"id": staged["plan"]})
     assert plan["machine"] == "node-b" and plan["source"] == str(card.path)
     assert plan["destination"] == str(tmp_path / "ssd-b" / "ingest")
@@ -182,14 +222,24 @@ def test_a_send_lands_every_file_verified_and_never_touches_the_source(
         assert item["probe"]["sha256"] == hash_file(card.path / item["rel"])
         assert item["dest"] == str(tmp_path / "ssd-b" / "ingest" / item["rel"])
     row = call("ferry.transfer.get", {"id": sent["transfer"]})
-    assert (row["plan"], row["job"], row["machine"], row["total"]) == (staged["plan"], "job-2", "node-b", len(card.names))
+    assert (row["plan"], row["job"], row["machine"], row["total"]) == (
+        staged["plan"],
+        "job-2",
+        "node-b",
+        len(card.names),
+    )
     for rel in card.names:  # each source file is an Asset whose path is on the source machine
         paths = call("asset.get", {"sha256": hash_file(card.path / rel)})["paths"]
         assert str(card.path / rel) in [p["path"] for p in paths]
 
     context = land_context(park, submitted[1], tmp_path, source_server)
     result = jobs.land(context)
-    assert (result["status"], result["files"], result["failed"], result["bytes"]) == ("ok", len(card.names), 0, card.total_bytes)
+    assert (result["status"], result["files"], result["failed"], result["bytes"]) == (
+        "ok",
+        len(card.names),
+        0,
+        card.total_bytes,
+    )
     for rel in card.names:
         landed = tmp_path / "ssd-b" / "ingest" / rel
         assert landed.read_bytes() == (card.path / rel).read_bytes()
@@ -202,12 +252,20 @@ def test_a_send_lands_every_file_verified_and_never_touches_the_source(
     assert (row["status"], row["verified"], row["failed"]) == ("copied", len(card.names), 0)
     receipt = call("ferry.receipt.get", {"id": result["receipt"]})
     assert receipt["machine"] == "node-b" and receipt["detail"]["send"] == {
-        "source_machine": "node-a", "source": str(card.path),
-        "destination_machine": "node-b", "destination": str(tmp_path / "ssd-b" / "ingest")}
+        "source_machine": "node-a",
+        "source": str(card.path),
+        "destination_machine": "node-b",
+        "destination": str(tmp_path / "ssd-b" / "ingest"),
+    }
     for entry in receipt["files"]:
-        assert entry["sha256"] == hash_file(entry["dest"]) == hash_file(entry["source"]) and entry["verified"]
+        assert (
+            entry["sha256"] == hash_file(entry["dest"]) == hash_file(entry["source"])
+            and entry["verified"]
+        )
 
-    report = call("ferry.verify", {"transfer": sent["transfer"], "folder": str(tmp_path / "ssd-b" / "ingest")})
+    report = call(
+        "ferry.verify", {"transfer": sent["transfer"], "folder": str(tmp_path / "ssd-b" / "ingest")}
+    )
     assert report["clean"] is True and report["checked"] == len(card.names)
 
 
@@ -221,14 +279,21 @@ def test_a_file_already_there_is_kept_and_a_different_one_is_never_overwritten(
     (ingest / other).parent.mkdir(parents=True, exist_ok=True)
     (ingest / other).write_bytes(b"something else that was already on the SSD")
 
-    _sent, _staged, _context, result = run_send(call, park, card, tmp_path, submitted, source_server)
+    _sent, _staged, _context, result = run_send(
+        call, park, card, tmp_path, submitted, source_server
+    )
     assert result["status"] == "partial" and result["failed"] == 1
     assert (ingest / other).read_bytes() == b"something else that was already on the SSD"
     receipt = call("ferry.receipt.get", {"id": result["receipt"]})
-    assert any("already exists with different contents" in line and other in line for line in receipt["errors"])
+    assert any(
+        "already exists with different contents" in line and other in line
+        for line in receipt["errors"]
+    )
     kept = next(e for e in receipt["files"] if e["rel"] == same)
     assert kept["skipped"] is True
-    assert result["bytes"] == card.total_bytes - len((card.path / same).read_bytes()) - len((card.path / other).read_bytes())
+    assert result["bytes"] == card.total_bytes - len((card.path / same).read_bytes()) - len(
+        (card.path / other).read_bytes()
+    )
 
 
 def test_a_file_that_changed_after_staging_is_refused_and_deleted(
@@ -239,7 +304,11 @@ def test_a_file_that_changed_after_staging_is_refused_and_deleted(
     changed = card.names[0]
     (card.path / changed).write_bytes(b"edited on the source after it was hashed")
     result = jobs.land(land_context(park, submitted[1], tmp_path, source_server))
-    assert result["status"] == "partial" and result["failed"] == 1 and result["files"] == len(card.names) - 1
+    assert (
+        result["status"] == "partial"
+        and result["failed"] == 1
+        and result["files"] == len(card.names) - 1
+    )
     assert not (tmp_path / "ssd-b" / "ingest" / changed).exists()
     assert not list((tmp_path / "ssd-b").rglob("*.part"))
     receipt = call("ferry.receipt.get", {"id": result["receipt"]})
@@ -254,7 +323,9 @@ def test_a_destination_without_the_room_fails_before_anything_is_fetched(
     jobs.stage(stage_context(park, submitted[0], tmp_path))
     import shutil
 
-    monkeypatch.setattr(shutil, "disk_usage", lambda path: types.SimpleNamespace(total=10, used=10, free=10))
+    monkeypatch.setattr(
+        shutil, "disk_usage", lambda path: types.SimpleNamespace(total=10, used=10, free=10)
+    )
     context = land_context(park, submitted[1], tmp_path, source_server)
     result = jobs.land(context)
     assert result["status"] == "failed" and result["files"] == 0
@@ -266,9 +337,18 @@ def test_a_destination_without_the_room_fails_before_anything_is_fetched(
 # -- when it cannot start ------------------------------------------------------------
 
 
-def test_a_source_that_is_not_a_folder_ends_the_transfer_with_the_reason(call, park, card, tmp_path, machines, submitted):
-    sent = call("ferry.send", {"source_machine": "node-a", "source": str(tmp_path / "unmounted"),
-                               "destination_machine": "node-b", "destination": str(tmp_path / "dest")})
+def test_a_source_that_is_not_a_folder_ends_the_transfer_with_the_reason(
+    call, park, card, tmp_path, machines, submitted
+):
+    sent = call(
+        "ferry.send",
+        {
+            "source_machine": "node-a",
+            "source": str(tmp_path / "unmounted"),
+            "destination_machine": "node-b",
+            "destination": str(tmp_path / "dest"),
+        },
+    )
     result = jobs.stage(stage_context(park, submitted[0], tmp_path))
     assert result["status"] == "failed"
     row = call("ferry.transfer.get", {"id": sent["transfer"]})
@@ -276,14 +356,24 @@ def test_a_source_that_is_not_a_folder_ends_the_transfer_with_the_reason(call, p
     assert [c["name"] for c in submitted] == ["stage"]  # no landing was queued
 
 
-def test_land_only_takes_a_transfer_that_is_waiting_for_it(call, park, card, tmp_path, machines, submitted):
+def test_land_only_takes_a_transfer_that_is_waiting_for_it(
+    call, park, card, tmp_path, machines, submitted
+):
     send(call, card, tmp_path)
     jobs.stage(stage_context(park, submitted[0], tmp_path))
     args = submitted[0]["params"]
     with pytest.raises(Exception, match="not waiting to be landed"):
-        call("ferry.send.land", {"transfer": args["transfer"], "source_machine": "node-a", "source": str(card.path),
-                                 "destination_machine": "node-b", "destination": args["destination"],
-                                 "items": [{"rel": "a", "size": 1, "sha256": "0" * 64}]})
+        call(
+            "ferry.send.land",
+            {
+                "transfer": args["transfer"],
+                "source_machine": "node-a",
+                "source": str(card.path),
+                "destination_machine": "node-b",
+                "destination": args["destination"],
+                "items": [{"rel": "a", "size": 1, "sha256": "0" * 64}],
+            },
+        )
 
 
 @pytest.mark.parametrize(
@@ -293,7 +383,13 @@ def test_land_only_takes_a_transfer_that_is_waiting_for_it(call, park, card, tmp
         ([{"rel": "/etc/passwd", "size": 1, "sha256": "0" * 64}], "not a path inside"),
         ([{"rel": "a.mov", "size": 1, "sha256": "short"}], "64 character sha256"),
         ([{"rel": "a.mov", "size": -1, "sha256": "0" * 64}], "non-negative size"),
-        ([{"rel": "a.mov", "size": 1, "sha256": "0" * 64}, {"rel": "./a.mov", "size": 1, "sha256": "1" * 64}], "same path"),
+        (
+            [
+                {"rel": "a.mov", "size": 1, "sha256": "0" * 64},
+                {"rel": "./a.mov", "size": 1, "sha256": "1" * 64},
+            ],
+            "same path",
+        ),
         ([], "nothing to land"),
     ],
 )
@@ -302,8 +398,16 @@ def test_the_landing_plan_refuses_names_that_climb_out_or_collide(
 ):
     sent = send(call, card, tmp_path)
     with pytest.raises(Exception, match=message):
-        call("ferry.send.land", {"transfer": sent["transfer"], "source_machine": "node-a", "source": str(card.path),
-                                 "destination_machine": "node-b", "destination": str(tmp_path / "dest"),
-                                 "items": items})
+        call(
+            "ferry.send.land",
+            {
+                "transfer": sent["transfer"],
+                "source_machine": "node-a",
+                "source": str(card.path),
+                "destination_machine": "node-b",
+                "destination": str(tmp_path / "dest"),
+                "items": items,
+            },
+        )
     assert [c["name"] for c in submitted] == ["stage"]
     assert call("ferry.transfer.get", {"id": sent["transfer"]})["plan"] == ""

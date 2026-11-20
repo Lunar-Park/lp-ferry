@@ -151,10 +151,10 @@ def require_inside(path: Path, root: Path) -> None:
 
 
 def validate_mounts(plan: dict) -> None:
-    for field, signature in (plan.get("mounts") or {}).items():
-        root = Path(plan[field])
+    for side, signature in (plan.get("mounts") or {}).items():
+        root = Path(plan[side])
         if mount_signature(root) != signature:
-            raise ValueError(f"{field} mount changed since planning: {root}")
+            raise ValueError(f"{side} mount changed since planning: {root}")
 
 
 def build_owned(

@@ -14,7 +14,7 @@ import pytest
 park = pytest.importorskip("park", reason="park is not installed")
 
 from park.ops import REGISTRY, op  # noqa: E402
-from park_plugins.ferry import jobs
+from park_plugins.ferry import jobs  # noqa: E402 - after the park importorskip above
 
 
 @pytest.fixture
@@ -58,7 +58,12 @@ def test_offload_queues_the_copy_and_records_the_job(call, worker_plan, submitte
 
 @pytest.mark.parametrize("filing_reply_lost", [False, True])
 def test_owned_transfer_reconciles_a_retry_and_files_its_receipt(
-    call, park, worker_plan, job_context, monkeypatch, filing_reply_lost,
+    call,
+    park,
+    worker_plan,
+    job_context,
+    monkeypatch,
+    filing_reply_lost,
 ):
     from park.node.client import NodeError
 
@@ -112,15 +117,22 @@ def test_owned_transfer_reconciles_a_retry_and_files_its_receipt(
 
 
 def test_an_unowned_plan_cannot_enter_the_shared_copy_queue(call, card, tmp_path):
-    historical = call("ferry.plan", {
-        "source": str(card.path), "destination": str(tmp_path / "offload"), "probe": False,
-    })
+    historical = call(
+        "ferry.plan",
+        {
+            "source": str(card.path),
+            "destination": str(tmp_path / "offload"),
+            "probe": False,
+        },
+    )
     with pytest.raises(Exception, match="plan again on the worker"):
         call("ferry.offload", {"plan": historical["id"]})
     assert call("ferry.transfer.list", {"plan": historical["id"]}) == []
 
 
-def test_a_replaced_destination_mount_does_not_receive_old_plan_bytes(call, worker_plan, job_context):
+def test_a_replaced_destination_mount_does_not_receive_old_plan_bytes(
+    call, worker_plan, job_context
+):
     plan = worker_plan()
     dest = Path(plan["destination"])
     dest.rename(dest.with_name("prior-mount"))

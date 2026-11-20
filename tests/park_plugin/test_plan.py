@@ -69,7 +69,6 @@ def test_reopening_a_v1_index_replays_existing_plans(tmp_path, card, monkeypatch
     from park.kernel import Park, index
     from park.ops import invoke
     from park.plugins import loader
-
     from park_plugins.ferry import config, layout
 
     loader.load_all()
@@ -83,7 +82,16 @@ def test_reopening_a_v1_index_replays_existing_plans(tmp_path, card, monkeypatch
     }
 
     def apply_old_plan(conn, event):
-        fields = ("id", "label", "source", "destination", "template", "on_conflict", "fingerprint", "created")
+        fields = (
+            "id",
+            "label",
+            "source",
+            "destination",
+            "template",
+            "on_conflict",
+            "fingerprint",
+            "created",
+        )
         conn.execute(
             "INSERT INTO ferry_plans (id, label, source, destination, template, on_conflict, fingerprint, created)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -168,18 +176,26 @@ def test_a_missing_source_is_not_found(call, tmp_path):
 
 
 def test_worker_planning_rejects_overwrite_while_local_planning_keeps_its_config(
-    call, card, tmp_path, worker_plan,
+    call,
+    card,
+    tmp_path,
+    worker_plan,
 ):
     config_path = tmp_path / "ferry.toml"
     config_path.write_text('[organize]\non_conflict = "overwrite"\n', encoding="utf-8")
-    with pytest.raises(Exception, match="Set organize.on_conflict to 'skip' or 'rename'"):
+    with pytest.raises(Exception, match=r"Set organize\.on_conflict to 'skip' or 'rename'"):
         worker_plan(config_path=str(config_path))
     assert call("ferry.plan.list") == []
 
-    local = call("ferry.plan", {
-        "source": str(card.path), "destination": str(tmp_path / "offload"),
-        "config_path": str(config_path), "probe": False,
-    })
+    local = call(
+        "ferry.plan",
+        {
+            "source": str(card.path),
+            "destination": str(tmp_path / "offload"),
+            "config_path": str(config_path),
+            "probe": False,
+        },
+    )
     assert local["on_conflict"] == "overwrite"
 
 
