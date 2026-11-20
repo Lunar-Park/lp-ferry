@@ -18,6 +18,18 @@ needs = []
 egress = "none"
 
 [[jobs]]
+name = "stage"
+handler = "park_plugins.ferry.jobs:stage"
+needs = []
+egress = "none"
+
+[[jobs]]
+name = "land"
+handler = "park_plugins.ferry.jobs:land"
+needs = []
+egress = "lan"
+
+[[jobs]]
 name = "proxy"
 handler = "park_plugins.ferry.jobs:proxy"
 needs = ["ffmpeg"]

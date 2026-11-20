@@ -9,6 +9,7 @@ landed becomes a row the Ingest view and ``ferry.receipt.get`` can show.
 from __future__ import annotations
 
 import json
+import posixpath
 import re
 from collections.abc import Callable
 from hashlib import sha256
@@ -542,6 +543,171 @@ def ferry_offload(
         "files": total,
         "bytes": row["bytes"],
     }
+
+
+# -- send: one machine's disk to another's, directly ---------------------------------
+
+
+def _absolute(value: str, where: str) -> str:
+    text = str(value or "").strip()
+    if not text or not posixpath.isabs(text):
+        raise Invalid(f"{where} must be an absolute path")
+    return posixpath.normpath(text)
+
+
+def _landing_path(root: str, rel: str) -> str:
+    """Where ``rel`` lands under ``root``; a name that would climb out of it is refused."""
+    clean = posixpath.normpath(str(rel or ""))
+    if not rel or posixpath.isabs(rel) or clean in (".", "..") or clean.startswith("../"):
+        raise Invalid(f"{rel!r} is not a path inside the folder being sent")
+    return posixpath.join(root, clean)
+
+
+@_op(
+    "ferry.send",
+    summary="Send a folder from one machine's disk to another's, directly, verified, with a receipt.",
+    effect="write",
+    returns="{transfer, job, source_machine, destination_machine, queued}",
+)
+def ferry_send(
+    ctx: OpContext,
+    source_machine: Annotated[str, "Machine that holds the folder"],
+    source: Annotated[str, "Absolute path of the folder on that machine"],
+    destination_machine: Annotated[str, "Machine the files should land on"],
+    destination: Annotated[str, "Absolute path of the folder they land in, on that machine"],
+    label: Annotated[str | None, "Name for the send; the source folder's name when absent"] = None,
+    project: Annotated[str | None, "Project id or slug"] = None,
+) -> dict:
+    """Queues the first of two jobs. The source machine hashes and registers every file in
+    place (``ferry.stage``); when that finishes, the destination machine is told to fetch each
+    one straight from the source machine's file server (``ferry.land``). No byte passes through
+    the hub and nothing is staged on a third machine, and the source is never changed."""
+    root, target = _absolute(source, "source"), _absolute(destination, "destination")
+    origin = ctx.call("machines.get", {"machine": source_machine})
+    landing = ctx.call("machines.get", {"machine": destination_machine})
+    if origin["id"] == landing["id"]:
+        raise Invalid("source and destination are the same machine; plan an offload instead")
+    scope = ctx.call("project.get", {"project": project}) if project else None
+    transfer = ids.new_id()
+    job_id, queued = _submit(
+        ctx, "stage",
+        {
+            "transfer": transfer, "source": root, "destination": target,
+            "destination_machine": landing["id"], "label": label or posixpath.basename(root),
+            "project": scope["id"] if scope else None,
+        },
+        origin["id"],
+    )
+    if not queued:
+        raise Unavailable("Park did not accept the stage job")
+    ctx.write(
+        "ferry.transfer.queued",
+        {"id": transfer, "plan": "", "job": job_id, "machine": origin["id"], "total": 0, "queued": _now()},
+    )
+    return {
+        "transfer": transfer, "job": job_id, "source_machine": origin["id"],
+        "destination_machine": landing["id"], "queued": True,
+    }
+
+
+@_op(
+    "ferry.send.land",
+    summary="Plan the landing of a staged send and queue it on the destination machine.",
+    effect="write",
+    returns="{plan, transfer, job, machine}",
+)
+def ferry_send_land(
+    ctx: OpContext,
+    transfer: Annotated[str, "Transfer id from ferry.send"],
+    source_machine: Annotated[str, "Machine the files were staged on"],
+    source: Annotated[str, "Folder on that machine"],
+    destination_machine: Annotated[str, "Machine to land them on"],
+    destination: Annotated[str, "Folder on that machine"],
+    items: Annotated[list[dict], "Staged files: [{rel, source, size, mtime, kind, sha256}]"],
+    label: Annotated[str | None, "Name for the plan"] = None,
+    project: Annotated[str | None, "Project id or slug"] = None,
+) -> dict:
+    """Called by the stage job once every file is hashed. The plan it records belongs to the
+    destination machine, so the land job's ownership checks are the ones every transfer has."""
+    current = _transfer_row(ctx, transfer)
+    if current["ended"] or current["plan"]:
+        raise Conflict(f"transfer {transfer} is not waiting to be landed")
+    origin = ctx.call("machines.get", {"machine": source_machine})["id"]
+    if current["machine"] != origin:
+        raise Conflict("the transfer was staged by a different machine")
+    landing = ctx.call("machines.get", {"machine": destination_machine})["id"]
+    root, target = _absolute(source, "source"), _absolute(destination, "destination")
+    if not items:
+        raise Invalid("there is nothing to land")
+    rows = []
+    for item in items:
+        digest = str(item.get("sha256") or "").strip().lower()
+        if not SHA256_RE.match(digest):
+            raise Invalid(f"file {item.get('rel')!r} needs a 64 character sha256")
+        size = item.get("size")
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise Invalid(f"file {item.get('rel')!r} needs a non-negative size")
+        rows.append(
+            {
+                "rel": str(item["rel"]), "source": str(item.get("source") or ""),
+                "dest": _landing_path(target, item["rel"]), "size": size,
+                "mtime": item.get("mtime"), "kind": str(item.get("kind") or ""), "action": layout.COPY,
+                # A send plan keeps the hash the source machine computed in the item's probe, because
+                # that is the one fact a landing is checked against and no column holds it.
+                "probe": {"sha256": digest},
+            }
+        )
+    if len({row["dest"] for row in rows}) != len(rows):
+        raise Invalid("two files would land at the same path")
+    scope = ctx.call("project.get", {"project": project}) if project else None
+    plan_id = ids.new_id()
+    by_kind: dict[str, int] = {}
+    for row in rows:
+        by_kind[row["kind"]] = by_kind.get(row["kind"], 0) + 1
+    plan = {
+        "id": plan_id, "created": _now(), "label": label or posixpath.basename(root),
+        "source": root, "destination": target, "template": "{root}/{source_relpath}",
+        "on_conflict": "skip", "fingerprint": layout.fingerprint(rows), "files": len(rows),
+        "copies": len(rows), "skips": 0, "bytes": sum(row["size"] for row in rows), "by_kind": by_kind,
+        "machine": landing, "mounts": None, "items": rows,
+        "project": scope["id"] if scope else None, "project_slug": scope["slug"] if scope else None,
+    }
+    ctx.write("ferry.plan.created", plan, project=plan["project"])
+    job_id, queued = _submit(
+        ctx, "land", {"plan": plan_id, "transfer": transfer, "machine": landing, "source_machine": origin}, landing
+    )
+    if not queued:
+        raise Unavailable("Park did not accept the land job")
+    ctx.write(
+        "ferry.transfer.queued",
+        {"id": transfer, "plan": plan_id, "job": job_id, "machine": landing, "total": len(rows), "queued": _now()},
+    )
+    return {"plan": plan_id, "transfer": transfer, "job": job_id, "machine": landing}
+
+
+@_op(
+    "ferry.send.fail",
+    summary="End a send that could not be staged, with the reason.",
+    effect="write",
+    returns="{transfer}",
+)
+def ferry_send_fail(
+    ctx: OpContext,
+    transfer: Annotated[str, "Transfer id from ferry.send"],
+    errors: Annotated[list[str], "What went wrong, one line each"],
+) -> dict:
+    """Called by the stage job when it cannot reach a plan. A send that already has a plan ends
+    through its landing receipt instead."""
+    current = _transfer_row(ctx, transfer)
+    if current["ended"] or current["plan"]:
+        raise Conflict(f"transfer {transfer} is not waiting to be staged")
+    problems = [str(line) for line in errors] or ["the send failed"]
+    ctx.write(
+        "ferry.transfer.finished",
+        {"id": transfer, "status": TRANSFER_STATUS["failed"], "files": 0, "verified": 0, "skipped": 0,
+         "failed": len(problems), "bytes": 0, "errors": problems, "digest": None, "ended": _now()},
+    )
+    return {"transfer": transfer}
 
 
 @_op("ferry.transfer.get", summary="One transfer with its progress.")

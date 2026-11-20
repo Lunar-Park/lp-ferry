@@ -28,6 +28,9 @@ disk outside park's write lock.
 | `ferry.receipt.record` | write | Write the receipt for a job; a copy receipt also closes its transfer |
 | `ferry.receipt.get` | read | One receipt, with every file, hash and destination |
 | `ferry.receipt.list` | read | Receipt summaries, newest first |
+| `ferry.send` | write | Send a folder from one machine's disk to another's: queue the stage job on the source machine |
+| `ferry.send.land` | write | Called by the stage job: plan the landing and queue the land job on the destination machine |
+| `ferry.send.fail` | write | Called by the stage job when it cannot reach a plan: end the transfer with the reason |
 | `ferry.verify` | external | Hash a transfer's destinations again and compare with its receipt |
 | `ferry.proxies` | write | Queue a `ferry.proxy` job for the video in a folder |
 | `ferry.resolve_project` | write | Record a Resolve project request and queue a `ferry.resolve` job |
@@ -37,6 +40,8 @@ disk outside park's write lock.
 | Job | Needs | What it does |
 |---|---|---|
 | `ferry.copy` | nothing | Copies each planned file with a hash check on the way in and out, then registers it with `job.register_output` so it lands as an Asset by hash. A mismatch is reported, not counted as copied |
+| `ferry.stage` | nothing | On the source machine: hashes every file in place and registers it as an Asset whose path is on that machine. Copies nothing, writes nothing to the source. Declares `egress = "none"` |
+| `ferry.land` | nothing | On the destination machine: fetches each staged file by hash straight from the source machine's file server (`fetch_asset(..., from_machine=)`), writes it under the destination, hashes it again, and registers it. A file that arrives with another hash is deleted and reported. Existing destinations are preserved. Declares `egress = "lan"` |
 | `ferry.proxy` | `ffmpeg` | Encodes a ProRes proxy per item and registers each proxy |
 | `ferry.resolve` | nothing | Writes the project manifest and, when Resolve's scripting module is installed, creates the project. The manifest is the deliverable when it is not |
 
@@ -61,6 +66,28 @@ instead of copying nothing.
 The plan event carries every file, so a plan is one event and one row per file. A receipt
 carries every file it records, with the SHA-256 of what landed; `ferry.verify` reads that
 receipt as its baseline.
+
+## Sending between machines
+
+`ferry.send` moves a folder from one machine's disk to another's with every file hashed at both
+ends, a receipt that names both machines, and every step an op an agent can call.
+
+```
+ferry.send -> stage job (source machine) -> ferry.send.land -> land job (destination machine)
+```
+
+The stage job hashes and registers the source in place. The land job takes each file straight from
+the source machine's node file server; the hub only says where that server is and carries no bytes,
+and nothing is staged on a third machine. A send plan is an ordinary plan row owned by the
+destination machine, and its items carry the hash the source computed in their `probe` object, so no
+table changed. The receipt is a `copy` receipt whose `detail.send` names both machines, which is what
+`ferry.verify` and the Ingest view already read.
+
+Needs park's `fetch_asset(..., from_machine=)` (park branch `feat/direct-fetch`), the source machine's
+node file server on and reachable from the destination (`serve_files`, a `bind` address the destination
+can reach, a correct `advertise_url`), and Ferry loaded on both nodes. A send never deletes the source.
+Not yet: a grant scoped to one transfer (today any valid node token can fetch a file by hash from a
+file server), a pre-check of the destination before the source is hashed, and Windows destinations.
 
 ## `ferry.toml`
 
