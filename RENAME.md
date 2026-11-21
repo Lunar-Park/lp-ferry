@@ -26,11 +26,11 @@ Rename the project from `media-mate` to `file-ferry` and make the DaVinci Resolv
 
 ### 1.2 Files to update
 
-- [x] `pyproject.toml` — name, version → 0.3.0, scripts entry point
+- [x] `pyproject.toml` — name, version → 0.2.4, scripts entry point
 - [x] `src/media_mate/` → `src/file_ferry/` (rename directory)
 - [x] All internal imports (`from media_mate.X` → `from file_ferry.X`)
 - [x] `README.md` — all references, install instructions, badges, CLI examples
-- [x] `CHANGELOG.md` (if exists) — note the rename *(no CHANGELOG.md; recorded as `SPEC.md` §19 "v0.3.0 — Rename to ferry")*
+- [x] `CHANGELOG.md` (if exists) — note the rename *(no CHANGELOG.md; recorded as `SPEC.md` §19 "v0.2.4 — Rename to ferry")*
 - [x] CI workflow (`.github/workflows/ci.yml`) — any hardcoded paths or package names
 - [x] Tests — all imports and references
 - [x] `LICENSE` — check if name is referenced *(checked: no project name in it, unchanged)*
@@ -113,7 +113,10 @@ Actually — Resolve has no pip dependency. It's detected at runtime. So `option
 
 ### 3.1 Minor cleanup
 
-- [x] Version: v0.3.0 (new name, continuous from media-mate)
+- [x] Version: v0.2.4 (new name, continuous from media-mate)
+  *(drafted as `0.3.0`; shipped as `0.2.4` — the rename was never released
+  under `0.3`, and the decision was to stay on the `0.2` series and bump the
+  third digit.)*
 - [x] `__init__.py` — update `__version__` and any public API exports
 - [x] Ruff format pass after all renames
 - [x] Ensure all tests pass with new package name
@@ -138,7 +141,7 @@ Actually — Resolve has no pip dependency. It's detected at runtime. So `option
 
 ## Decisions
 
-- [x] **Version number** — v0.3.0 (continuity from media-mate)
+- [x] **Version number** — v0.2.4 (continuity from media-mate)
 - [x] **GitHub org** — `dspury/file-ferry` (personal) — *superseded 2026-10-28;
       the repo now lives at `Lunar-Park/lp-ferry` (org)*
 - [x] **CLI command** — `ferry`
@@ -235,7 +238,7 @@ still resolves and existing clones keep working.
   two-name rule in SPEC.md §14 stands unchanged — `file-ferry` is the project,
   `ferry` is what you type.
 - **The code.** No source file was touched by the move.
-- **The version.** Still `0.3.0` in `pyproject.toml`, still untagged and
+- **The version.** Still `0.2.4` in `pyproject.toml`, still untagged and
   unreleased.
 
 ### What did change
@@ -250,7 +253,7 @@ still resolves and existing clones keep working.
 ### What was deliberately not done
 
 - **No release, no tag, no publish.** The `file-ferry` name on PyPI is still
-  unregistered; there is still no `v0.3.0` tag and no GitHub release. Those
+  unregistered; there is still no `v0.2.4` tag and no GitHub release. Those
   are D's decision and were not taken as part of the move.
 - **The Electron `appId` was left alone.** It is still
   `io.github.dspury.file-ferry`. Changing an app identifier that has already

@@ -632,3 +632,78 @@ class TestFetchRecentRuns:
 
         rows = _fetch_recent_runs(tmp_db, 2)
         assert len(rows) == 2
+
+
+# ---------------------------------------------------------------------------
+# missing media tools
+# ---------------------------------------------------------------------------
+
+
+class TestMissingMediaTools:
+    """A missing ffmpeg/ffprobe is a one-line error with the fix, not a traceback.
+
+    Found by installing the published wheel in a clean home with ffmpeg off
+    PATH: `ferry probe <folder>` raised `ProbeError` up through Click and
+    printed a Python stack trace. The message named the problem but not the
+    cure, which is the wrong answer for someone's first five minutes.
+    """
+
+    def _no_tools(self, tmp_path: Path) -> Path:
+        """A config with no ffmpeg_path, so the binary really has to be on PATH."""
+        config = tmp_path / "ferry.toml"
+        config.write_text("")
+        return config
+
+    def test_probe_reports_the_missing_binary_without_a_stack_trace(
+        self, runner: CliRunner, tmp_path: Path, tmp_db: Path
+    ) -> None:
+        config = self._no_tools(tmp_path)
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        (raw / "a.mov").write_bytes(b"a")
+
+        with patch("file_ferry.probe.shutil.which", return_value=None):
+            result = runner.invoke(
+                main, ["--db", str(tmp_db), "--config", str(config), "probe", str(raw)]
+            )
+
+        assert result.exit_code == 1
+        assert "ffprobe is required" in result.output
+        assert "install with:" in result.output
+        assert "ffmpeg_path" in result.output
+        assert "Traceback" not in result.output
+
+    def test_run_stops_with_the_same_message(
+        self, runner: CliRunner, tmp_path: Path, tmp_db: Path
+    ) -> None:
+        """The pipeline's first step is probe, so it fails the same way."""
+        config = self._no_tools(tmp_path)
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        (raw / "a.mov").write_bytes(b"a")
+
+        with patch("file_ferry.probe.shutil.which", return_value=None):
+            result = runner.invoke(
+                main, ["--db", str(tmp_db), "--config", str(config), "run", str(raw)]
+            )
+
+        assert result.exit_code == 1
+        assert "ffprobe is required" in result.output
+        assert "Traceback" not in result.output
+
+    def test_a_real_probe_failure_keeps_its_own_reason(self) -> None:
+        """Only the missing-binary case gets the install line."""
+        from file_ferry.cli import _explain_media_error
+        from file_ferry.probe import ProbeError
+
+        exc = ProbeError(Path("/media/a.mov"), "ffprobe exited 1: invalid data found")
+        explained = _explain_media_error(exc)
+
+        assert "invalid data found" in explained
+        assert "install with:" not in explained
+
+    def test_the_install_line_matches_the_platform(self) -> None:
+        from file_ferry.cli import _ffmpeg_install_hint
+
+        hint = _ffmpeg_install_hint()
+        assert "ffmpeg" in hint

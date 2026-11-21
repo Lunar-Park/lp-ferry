@@ -141,9 +141,9 @@ LOGGER = logging.getLogger(__name__)
 
 # The version the sidecar reports over `app.getStatus` / `app.doctor`.
 # Derived rather than declared: it was a separate literal
-# ("0.0.0+foundation") through 0.3.0, so the desktop Environment screen
+# ("0.0.0+foundation") through 0.2.4, so the desktop Environment screen
 # told the operator they were running 0.0.0 while the same run stamped
-# 0.3.0 into its receipts. Two version strings describing one operation
+# 0.2.4 into its receipts. Two version strings describing one operation
 # undercut both surfaces, so there is now one source.
 SIDECAR_VERSION = APP_VERSION
 

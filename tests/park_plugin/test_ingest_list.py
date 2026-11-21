@@ -49,7 +49,7 @@ def test_a_row_follows_its_transfer_from_queued_to_done_with_the_receipt(
     assert queued["transfer"] == transfer["transfer"]
     assert queued["attempts"] == 1
 
-    call("ferry.transfer.start", {"transfer": transfer["transfer"], "machine": "titus"})
+    call("ferry.transfer.start", {"transfer": transfer["transfer"], "machine": "studio-b"})
     call(
         "ferry.transfer.progress",
         {"transfer": transfer["transfer"], "done": 2, "total": 4, "note": "copying"},
@@ -57,7 +57,7 @@ def test_a_row_follows_its_transfer_from_queued_to_done_with_the_receipt(
     (running,) = call("ferry.ingest.list", {})["rows"]
     assert running["state"] == "running"
     assert running["fraction"] == 0.5 and running["done"] == 2 and running["total"] == 4
-    assert running["machine"] == "titus"
+    assert running["machine"] == "studio-b"
 
     context = job_context("copy", {"plan": plan["id"], "transfer": transfer["transfer"]})
     jobs.copy(context)

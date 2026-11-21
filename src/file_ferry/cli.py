@@ -17,11 +17,13 @@ Layout:
 
 from __future__ import annotations
 
+import functools
 import json
 import sqlite3
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import click
 from rich.console import Console
@@ -33,9 +35,56 @@ from file_ferry.log import LogStore
 from file_ferry.models import FerryConfig, ResolveProjectSpec
 from file_ferry.organize import organize_path
 from file_ferry.paths import default_db_path, legacy_db_is_shadowed, legacy_db_path
-from file_ferry.probe import probe_path
+from file_ferry.probe import ProbeError, probe_path
 from file_ferry.proxy import ProxyError, find_ffmpeg, generate_proxies
 from file_ferry.verify import verify_folder
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _ffmpeg_install_hint() -> str:
+    """The line a first-time user can actually run on this platform."""
+    if sys.platform == "darwin":
+        return "brew install ffmpeg"
+    if sys.platform.startswith("linux"):
+        return "sudo apt install ffmpeg   # or your distro's equivalent"
+    return "see https://ffmpeg.org/download.html"
+
+
+def _explain_media_error(exc: ProbeError | ProxyError) -> str:
+    """Turn a missing-tool failure into the reason plus the fix.
+
+    Both probe and proxy report a missing binary as "not found on PATH and
+    config.ffmpeg_path not set" -- accurate, and useless to someone who has
+    just downloaded the tool. Name the binary, give the install line, and
+    mention the config key for people who keep ffmpeg somewhere unusual.
+    """
+    reason = exc.reason
+    if "not found" not in reason:
+        return str(exc)
+    binary = "ffprobe" if exc.path.name == "ffprobe" else "ffmpeg"
+    return (
+        f"{binary} is required and was not found. ffprobe ships with ffmpeg: "
+        f"install with: {_ffmpeg_install_hint()} -- or set ffmpeg_path in your "
+        "config to point at an existing binary."
+    )
+
+
+def _report_media_errors(command: _F) -> _F:
+    """Report a missing tool as a one-line error, not a stack trace.
+
+    Every command here resolves ffmpeg/ffprobe before its first real step, so
+    the failure is a precondition, not a crash: exit 1 with the fix in hand.
+    """
+
+    @functools.wraps(command)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return command(*args, **kwargs)
+        except (ProbeError, ProxyError) as exc:
+            raise click.ClickException(_explain_media_error(exc)) from exc
+
+    return wrapper  # type: ignore[return-value]
 
 
 def _load_create_resolve_project() -> Any:
@@ -157,12 +206,7 @@ def doctor(ctx: click.Context) -> None:
         ffmpeg = find_ffmpeg(cfg)
     except ProxyError:
         missing = True
-        if sys.platform == "darwin":
-            install = "brew install ffmpeg"
-        elif sys.platform.startswith("linux"):
-            install = "sudo apt install ffmpeg   # or your distro's equivalent"
-        else:
-            install = "see https://ffmpeg.org/download.html"
+        install = _ffmpeg_install_hint()
         table.add_row(
             "ffmpeg",
             f"[red]not found[/red] -- install with: {install}",
@@ -212,6 +256,7 @@ def doctor(ctx: click.Context) -> None:
 @main.command()
 @click.argument("path", type=click.Path(exists=True, path_type=Path))
 @click.pass_context
+@_report_media_errors
 def probe(ctx: click.Context, path: Path) -> None:
     """Probe a file or directory and write results to the audit log."""
     store = _get_store(ctx)
@@ -264,6 +309,7 @@ def probe(ctx: click.Context, path: Path) -> None:
     help="Show what would be organized without moving or copying any files.",
 )
 @click.pass_context
+@_report_media_errors
 def organize(ctx: click.Context, path: Path, root: Path, do_move: bool, dry_run: bool) -> None:
     """Organize media files into a structured folder layout.
 
@@ -313,6 +359,7 @@ def organize(ctx: click.Context, path: Path, root: Path, do_move: bool, dry_run:
     help="Output directory for proxies (subpaths preserved).",
 )
 @click.pass_context
+@_report_media_errors
 def proxy(ctx: click.Context, path: Path, output_dir: Path) -> None:
     """Generate edit-friendly proxy files via ffmpeg."""
     store = _get_store(ctx)
@@ -437,6 +484,7 @@ def resolve_create(
     help="Acknowledge and record the current state as the new baseline after a mismatch.",
 )
 @click.pass_context
+@_report_media_errors
 def verify(ctx: click.Context, path: Path, accept_changes: bool) -> None:
     """Verify a folder against its previous checksum snapshot."""
     store = _get_store(ctx)
@@ -555,6 +603,7 @@ def _fetch_recent_runs(db_path: Path, limit: int) -> list[dict[str, Any]]:
     "(default: <source>-output next to the source folder).",
 )
 @click.pass_context
+@_report_media_errors
 def run_cmd(
     ctx: click.Context,
     path: Path,

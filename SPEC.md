@@ -1,8 +1,8 @@
-# file-ferry — Spec v0.3.0
+# file-ferry — Spec v0.2.4
 
 > **Name:** `file-ferry`
 > **Repo location:** `Lunar-Park/lp-ferry`
-> **Version:** 0.3.0
+> **Version:** 0.2.4
 > **Status:** Released — stable
 
 ---
@@ -785,10 +785,15 @@ external camera card appeared to "not probe or execute" from the TUI.
 
 ---
 
-### v0.3.0 — Rename to file-ferry
+### v0.2.4 — Rename to file-ferry
 
 The project was renamed from `media-mate` to `file-ferry`. No features were
 removed and no behavior changed; only identity and packaging moved.
+
+> **Version note.** This release was drafted as `0.3.0` and is shipped as
+> `0.2.4` instead: the rename had never been tagged or published, and the
+> decision was to stay on the `0.2` series rather than open `0.3` for it. The
+> number is patched above; nothing else about the move changed.
 
 Two names, by design (§14): **`file-ferry`** is the project — PyPI, the import
 name, the repo, document titles — and **`ferry`** is what you type and see —
@@ -855,13 +860,15 @@ What changed, and what did not:
   were updated together so that every `git clone` line is followed by a `cd`
   into the directory that clone actually creates.
 - **`RENAME.md` §1.4 (PyPI) is still D's.** The `file-ferry` name on PyPI is
-  unregistered and unpublished; the version in `pyproject.toml` is `0.3.0`, and
-  no `v0.3.0` tag or GitHub release exists. Publishing is D's decision and was
+  unregistered and unpublished; the version in `pyproject.toml` is `0.2.4`, and
+  no `v0.2.4` tag or GitHub release exists. Publishing is D's decision and was
   not taken as part of this move.
 
 The historical rename record in this document — the `media-mate` → `file-ferry`
-change in §19 and the identity table under "v0.3.0 — Rename to file-ferry" — is
-left as it was written. It records what was true at the time.
+change in §19 and the identity table under "v0.2.4 — Rename to file-ferry" — is
+left as it was written. It records what was true at the time. The one change is
+the version number: the move was drafted as `0.3.0`, never released under that
+number, and ships as `0.2.4`.
 
 ---
 

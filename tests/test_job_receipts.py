@@ -158,7 +158,7 @@ class TestReceiptStoreReplace:
         return build_receipt(
             operation_id="op-1",
             kind="offload",
-            app_version="0.3.0",
+            app_version="0.2.4",
             protocol_version=1,
             final_state=final_state,
         )
