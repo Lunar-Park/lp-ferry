@@ -53,7 +53,7 @@ def legacy_db_path() -> Path:
     """Return the pre-unification ``~/.ferry`` ledger path.
 
     Documented as the default in the README and ``CLI-TUI-PARITY.md`` for
-    every release up to 0.3.0, so an existing CLI/TUI install has its only
+    every release up to 0.2.4, so an existing CLI/TUI install has its only
     ledger here.
     """
     return Path.home() / ".ferry" / _DB_NAME

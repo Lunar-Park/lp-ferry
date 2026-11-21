@@ -1,6 +1,6 @@
 """ferry — Zero-cost CLI for post-production media ops."""
 
-__version__ = "0.3.0"
+__version__ = "0.2.4"
 
 # The version stamped into operation receipts (ADR-0003 §6.5). It lives
 # here rather than beside one of its writers: receipts are written by the

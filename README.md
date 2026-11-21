@@ -27,7 +27,7 @@ ends. It needs a file server on the source machine, which today accepts any vali
 plain HTTP: enable it only on a network you control. [How it works, and what it does not
 guarantee yet](docs/MACHINE-TO-MACHINE-SEND.md) · [threat model](SECURITY.md#threat-model--read-this-before-you-enable-a-node-file-server).
 
-[![Version](https://img.shields.io/badge/version-0.3.0-blue)](https://github.com/Lunar-Park/lp-ferry)
+[![Version](https://img.shields.io/badge/version-0.2.4-blue)](https://github.com/Lunar-Park/lp-ferry)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/Lunar-Park/lp-ferry/ci.yml?style=flat-square)](https://github.com/Lunar-Park/lp-ferry/actions/workflows/ci.yml)
@@ -251,7 +251,7 @@ setting you meant to change and did not is worse than a loud failure.
 
 ### Upgrading from media-mate (v0.2.x)
 
-v0.3.0 renamed the project, and with it every path it reads. Nothing is migrated
+v0.2.4 renamed the project, and with it every path it reads. Nothing is migrated
 automatically — `ferry` looks only at the new locations, and your old data is
 left untouched where it is. To carry it over:
 

@@ -42,7 +42,7 @@ function stubFerry(): void {
     app: {
       ...api.app,
       getStatus: () =>
-        Promise.resolve({ sidecarVersion: '0.3.0', protocolVersion: 1, capabilities: [] }),
+        Promise.resolve({ sidecarVersion: '0.2.4', protocolVersion: 1, capabilities: [] }),
     },
     job: { ...api.job, list: () => Promise.resolve({ jobs: [] }) },
     source: { ...api.source, listVolumes: () => Promise.resolve({ volumes: [] }) },
@@ -60,7 +60,7 @@ function stubFerryWithJobs(
     app: {
       ...api.app,
       getStatus: () =>
-        Promise.resolve({ sidecarVersion: '0.3.0', protocolVersion: 1, capabilities: [] }),
+        Promise.resolve({ sidecarVersion: '0.2.4', protocolVersion: 1, capabilities: [] }),
     },
     job: { ...api.job, list: () => Promise.resolve({ jobs }) },
     source: { ...api.source, listVolumes: () => Promise.resolve({ volumes: [] }) },
@@ -144,7 +144,7 @@ describe('App shell', () => {
       app: {
         ...api.app,
         getStatus: () =>
-          Promise.resolve({ sidecarVersion: '0.3.0', protocolVersion: 1, capabilities: [] }),
+          Promise.resolve({ sidecarVersion: '0.2.4', protocolVersion: 1, capabilities: [] }),
       },
       job: { ...api.job, list: () => Promise.resolve({ jobs: [running] }), cancel },
       source: { ...api.source, listVolumes: () => Promise.resolve({ volumes: [] }) },

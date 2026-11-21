@@ -35,7 +35,7 @@ class TestVersionIdentity:
 
     `SIDECAR_VERSION` was the separate literal "0.0.0+foundation", so
     `app.getStatus` / `app.doctor` told the operator they were running 0.0.0
-    while the same run stamped `APP_VERSION` (0.3.0) into its receipts.
+    while the same run stamped `APP_VERSION` (0.2.4) into its receipts.
     """
 
     def test_the_sidecar_reports_the_package_version(self) -> None:

@@ -31,14 +31,14 @@ describe('release provenance', () => {
 
   it('supports a stamped override for packaged builds', () => {
     __setReleaseInfo({
-      version: '0.3.0',
+      version: '0.2.4',
       commit: 'abc1234',
       buildTime: '2026-08-14T12:00:00Z',
       arch: 'arm64',
       protocolVersion: PROTOCOL_VERSION,
     });
     const info = getReleaseInfo();
-    expect(info.version).toBe('0.3.0');
+    expect(info.version).toBe('0.2.4');
     expect(info.commit).toBe('abc1234');
     expect(info.arch).toBe('arm64');
     expect(info.protocolVersion).toBe(PROTOCOL_VERSION);
@@ -46,13 +46,13 @@ describe('release provenance', () => {
 
   it('releaseSummary renders a diagnostic-ready block', () => {
     const summary = releaseSummary({
-      version: '0.3.0',
+      version: '0.2.4',
       commit: 'abc1234',
       buildTime: '2026-08-14T12:00:00Z',
       arch: 'arm64',
       protocolVersion: 1,
     });
-    expect(summary).toContain('version=0.3.0');
+    expect(summary).toContain('version=0.2.4');
     expect(summary).toContain('commit=abc1234');
     expect(summary).toContain('arch=arm64');
     expect(summary).toContain('protocol=1');
