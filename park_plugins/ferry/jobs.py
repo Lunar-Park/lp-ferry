@@ -9,6 +9,7 @@ has the source mounted. Park is reached only through ``job.call`` and
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -406,11 +407,18 @@ def land(job: JobContext) -> dict:
         probe = destination / f".ferry-write-test-{job.job_id}"
         probe.write_bytes(b"")
         probe.unlink()
+        # Space is needed only for the files that are not already there: a re-send of a folder
+        # that mostly landed before must not be refused for room it will never use.
+        already = [item for item in items if os.path.lexists(item["dest"])]
+        needed = sum(item["size"] for item in items if not os.path.lexists(item["dest"]))
         free = shutil.disk_usage(destination).free
-        if free < plan["bytes"]:
+        if free < needed:
             raise OSError(
-                f"not enough space on {job.machine} for {destination}: needs {plan['bytes']} bytes, {free} free"
+                f"not enough space on {job.machine} for {destination}: needs {needed} bytes, {free} free"
             )
+        job.log(
+            f"{total} files: {len(already)} already present at {destination}, {needed} bytes to write"
+        )
         for index, item in enumerate(items, start=1):
             check_cancelled()
             try:

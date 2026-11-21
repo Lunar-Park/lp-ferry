@@ -334,6 +334,35 @@ def test_a_destination_without_the_room_fails_before_anything_is_fetched(
     assert not [p for p in (tmp_path / "ssd-b" / "ingest").rglob("*") if p.is_file()]
 
 
+def test_a_resend_with_no_room_left_still_lands_the_files_that_are_already_there(
+    call, park, card, tmp_path, machines, submitted, source_server, monkeypatch
+):
+    """Space is checked against the bytes this run will actually write.
+
+    A send that landed once and is re-run on a full disk writes nothing: every file is a skip.
+    Refusing it for room it will never use turns a working no-op into a failure the operator
+    has to read a receipt to explain.
+    """
+    first = run_send(call, park, card, tmp_path, submitted, source_server)[3]
+    assert first["status"] == "ok"
+
+    import shutil
+
+    monkeypatch.setattr(
+        shutil, "disk_usage", lambda path: types.SimpleNamespace(total=10, used=10, free=0)
+    )
+    submitted.clear()  # this is a new send: its own stage and land submissions
+    _sent, _staged, _context, result = run_send(
+        call, park, card, tmp_path, submitted, source_server
+    )
+    assert (result["status"], result["files"], result["failed"], result["bytes"]) == (
+        "ok",
+        len(card.names),
+        0,
+        0,
+    )
+
+
 def test_every_landed_file_reaches_the_disk_before_the_receipt_calls_it_verified(
     call, park, card, tmp_path, machines, submitted, source_server, monkeypatch
 ):
