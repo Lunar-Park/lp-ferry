@@ -29,6 +29,40 @@ def hash_file(path: Path | str, *, check_cancelled: Callable[[], None] | None = 
     return digest.hexdigest()
 
 
+def fsync_file(path: Path | str) -> None:
+    """Push a file's bytes out of the page cache and wait for the device to take them.
+
+    Called on a file another process wrote (a send's landing) before any hash of it is
+    recorded as a receipt: a hash taken before the flush proves what is in the page cache,
+    not what is on the disk, and a power cut after the receipt would leave a verified
+    transfer with a file that never arrived. This is ``fsync``, not a drive-cache flush: it
+    covers the kernel's copy, not a disk that loses its own write cache.
+    """
+    fd = os.open(os.fspath(path), os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def fsync_dir(path: Path | str) -> None:
+    """Flush a directory entry, so a file published here survives a crash.
+
+    Best effort: not every platform or filesystem lets you fsync a directory, and a
+    refusal there does not change whether the bytes were published.
+    """
+    try:
+        fd = os.open(os.fspath(path), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def copy_verified(
     source: Path | str, dest: Path | str, *, check_cancelled: Callable[[], None] | None = None
 ) -> tuple[str, int]:
@@ -73,6 +107,7 @@ def copy_verified(
                     f"destination does not support safe no-replace publication: {dest.parent}"
                 ) from exc
             raise
+        fsync_dir(dest.parent)
     except FileExistsError:
         raise
     except OSError as exc:
@@ -84,4 +119,12 @@ def copy_verified(
     return staged, size
 
 
-__all__ = ["CHUNK_SIZE", "PART_SUFFIX", "CopyError", "copy_verified", "hash_file"]
+__all__ = [
+    "CHUNK_SIZE",
+    "PART_SUFFIX",
+    "CopyError",
+    "copy_verified",
+    "fsync_dir",
+    "fsync_file",
+    "hash_file",
+]

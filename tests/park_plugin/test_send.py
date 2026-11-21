@@ -334,6 +334,47 @@ def test_a_destination_without_the_room_fails_before_anything_is_fetched(
     assert not [p for p in (tmp_path / "ssd-b" / "ingest").rglob("*") if p.is_file()]
 
 
+def test_every_landed_file_reaches_the_disk_before_the_receipt_calls_it_verified(
+    call, park, card, tmp_path, machines, submitted, source_server, monkeypatch
+):
+    """A landed file is flushed before it is hashed or registered.
+
+    ``fetch_asset`` returning means the bytes are in this process's page cache, not on the
+    media. If the receipt is written first, a power cut strands a transfer that the receipt
+    calls verified with a file that never arrived.
+    """
+    send(call, card, tmp_path)
+    jobs.stage(stage_context(park, submitted[0], tmp_path))
+    order: list[tuple[str, str]] = []
+    real_fsync_file = jobs.fsync_file
+
+    monkeypatch.setattr(
+        jobs,
+        "fsync_file",
+        lambda path: (order.append(("flush", str(path))), real_fsync_file(path))[1],
+    )
+    context = land_context(park, submitted[1], tmp_path, source_server)
+    real_register = context.register_output
+
+    def register(path, role="output", meta=None):
+        order.append(("register", str(path)))
+        return real_register(path, role=role, meta=meta)
+
+    context.register_output = register
+
+    result = jobs.land(context)
+    assert result["status"] == "ok" and result["files"] == len(card.names)
+
+    landed = [str(tmp_path / "ssd-b" / "ingest" / rel) for rel in card.names]
+    assert [path for kind, path in order if kind == "flush"] == landed
+    for path in landed:
+        flushed = next(i for i, (kind, p) in enumerate(order) if kind == "flush" and p == path)
+        registered = next(
+            i for i, (kind, p) in enumerate(order) if kind == "register" and p == path
+        )
+        assert flushed < registered, f"{path} was recorded before it reached the disk"
+
+
 # -- when it cannot start ------------------------------------------------------------
 
 

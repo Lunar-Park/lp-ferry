@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from . import config, layout
-from .copy import CopyError, copy_verified, hash_file
+from .copy import CopyError, copy_verified, fsync_dir, fsync_file, hash_file
 from .probe import scan
 
 if TYPE_CHECKING:  # park is not importable in a plain interpreter
@@ -511,6 +511,12 @@ def _land_item(
     else:
         dest.parent.mkdir(parents=True, exist_ok=True)
         job.fetch_asset(expected, dest, from_machine=source_machine)
+        # The file was written by another process a moment ago. Flush it and wait for the
+        # device before anything hashes it and the receipt says "verified": without this,
+        # the hash proves what is in the page cache, and a power cut after the receipt
+        # leaves a verified transfer with a file that never reached the disk.
+        fsync_file(dest)
+        fsync_dir(dest.parent)
     registered = job.register_output(dest, role="transfer")
     if registered != expected:
         dest.unlink(missing_ok=True)

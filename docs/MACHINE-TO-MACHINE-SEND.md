@@ -30,6 +30,10 @@ machine A (source)                hub                machine B (destination)
 - **Existing destinations are preserved.** A file already at the destination is hashed and
   accepted only when it matches; a newly appearing destination is never replaced. `overwrite` is
   refused for a send.
+- **Durable before it is called verified.** Each landed file is flushed to the device, and the
+  directory entry that publishes it flushed too, before anything hashes it and the receipt says
+  "verified". A receipt therefore never describes bytes the kernel was still holding in memory.
+  That is `fsync`, not a drive-cache flush: a disk that loses its own write cache is out of scope.
 - **The source is never deleted or written to.** `ferry.stage` hashes and registers where the
   files already are and declares `egress = "none"`. Moving the source is a separate decision,
   after a verified receipt, and is not part of a send.
@@ -112,7 +116,9 @@ PYTHONPATH=/path/to/park:. pytest tests/park_plugin -q
   write into the source (three mutation checks fail the suite when a guard is removed).
 - **Proven separately:** the network path — a node file server answering a real pull between two
   machines, hash matching on arrival, `401` with a missing or wrong token, byte ranges honoured.
-- **Not yet:** a send between two real machines end to end, a check that the arrival hash reads
-  the bytes back from the physical disk rather than the OS cache, a fsync before the arrival hash,
-  a destination pre-check (free space, writable, expected mount) before the source is hashed, a
-  grant scoped to one transfer, TLS, and Windows destinations.
+- **Not yet:** a send between two real machines end to end; readback from the physical media (the
+  flush covers the kernel's copy, not the drive's own write cache, which would need `F_FULLFSYNC`
+  on macOS and `O_DIRECT`-style reads elsewhere); an expected-mount check on the destination (free
+  space and writability are checked on the destination machine before the first byte moves, but
+  after the source has been hashed); a grant scoped to one transfer; TLS; and Windows
+  destinations.
