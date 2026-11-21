@@ -17,6 +17,8 @@ if [[ -z "$APP" || ! -d "$APP" ]]; then
 fi
 
 FAIL=0
+CHECK_DIR="$(mktemp -d)"
+trap 'rm -rf "$CHECK_DIR"' EXIT
 echo "==> verifying packaged app: $APP"
 
 # 1. Sidecar executable present (the runtime resolves this path).
@@ -33,15 +35,25 @@ fi
 echo "--- frozen sidecar smoke test ---"
 SIDECAR="$(find "$SIDECAR_DIR" -name 'ferry-service' -type f | head -1 || true)"
 if [[ -n "$SIDECAR" && -x "$SIDECAR" ]]; then
-  OUT="$(echo '{"jsonrpc":"2.0","v":1,"kind":"request","id":"v","method":"app.getCapabilities","params":{}}' \
-    | "$SIDECAR" --once --db /tmp/mm-verify.db 2>/dev/null || true)"
-  if [[ "$OUT" == *'"method":"app.getCapabilities"'* || "$OUT" == *'"methods"'* ]]; then
+  REQUEST='{"jsonrpc":"2.0","v":1,"kind":"request","id":"v","method":"app.getCapabilities","params":{}}'
+  if "$SIDECAR" --once --db "$CHECK_DIR/ferry.db" <<<"$REQUEST" >"$CHECK_DIR/reply.json" \
+    && python3 - "$CHECK_DIR/reply.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+reply = json.loads(Path(sys.argv[1]).read_text())
+result = reply.get("result") or {}
+valid = (reply.get("id") == "v" and reply.get("kind") == "response" and
+         result.get("version") == 1 and "app.getCapabilities" in result.get("methods", []))
+sys.exit(0 if valid else 1)
+PY
+  then
     echo "OK: frozen sidecar served app.getCapabilities"
   else
-    echo "FAIL: frozen sidecar did not serve the protocol (got: ${OUT:0:120})" >&2
+    echo "FAIL: frozen sidecar did not return the expected capabilities response" >&2
     FAIL=1
   fi
-  rm -f /tmp/mm-verify.db
 else
   echo "FAIL: no executable sidecar found" >&2
   FAIL=1
