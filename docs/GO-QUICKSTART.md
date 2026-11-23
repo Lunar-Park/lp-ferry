@@ -117,3 +117,20 @@ The socket protocol (for the macOS app and other clients) is documented in [`IPC
 ## Releases
 
 `.goreleaser.yaml` builds static `linux`/`darwin` × `amd64`/`arm64` archives, which include this guide, the example config and both service files. Go releases are tagged `v2.*`; `v0.*` tags belong to the legacy Python app.
+
+## Standalone macOS app
+
+On macOS 14 or later with Go and the Xcode Swift toolchain, run `make app`
+and open `dist/Ferry.app`. The bundle contains the daemon, Inter and the app
+icon. The default signature is ad hoc. Set `FERRY_SIGN_IDENTITY` to select
+a signing identity. Ferry connects to `~/.ferry/ferry.sock` and starts its
+bundled daemon when the socket is unavailable. Set `FERRY_SOCKET` to use
+an alternate socket.
+
+Run `make app-test` for Swift model, reducer and scratch-daemon tests.
+Launch the bundle executable with `FERRY_FIXTURE=1` for an isolated sample
+workspace. To capture the five fixture views, run:
+
+```sh
+FERRY_FIXTURE=1 FERRY_SNAPSHOT_DIR="$PWD/dist/screens" dist/Ferry.app/Contents/MacOS/Ferry
+```

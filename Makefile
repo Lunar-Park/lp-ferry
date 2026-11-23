@@ -39,3 +39,10 @@ cross:
 
 clean:
 	rm -rf bin
+
+.PHONY: app app-test
+app:
+	./scripts/build-app.sh
+
+app-test:
+	cd app && swift test

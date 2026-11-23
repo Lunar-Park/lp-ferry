@@ -39,3 +39,6 @@ examples/test-dataset/output/
 
 # Go build output
 /bin/
+
+/app/.build/
+/app/.swiftpm/
