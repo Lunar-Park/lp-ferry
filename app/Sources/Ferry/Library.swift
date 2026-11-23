@@ -8,106 +8,39 @@ private struct Editor: Identifiable {
   var row: JSON = .null
   let id = UUID()
 }
+
+/// Saved destinations as raised glass cards, organization presets as an open list, and a
+/// glass pane that previews where a preset would put things.
 struct Library: View {
-  let store: Store
+  @Bindable var store: Store
   @State private var editor: Editor?
   @State private var previewID = ""
   @State private var scope = "All"
+
   var body: some View {
-    Segments(choices: ["All", "Destinations", "Presets"], selection: $scope)
-    VStack(spacing: 16) {
-      if scope != "Presets" {
-        Panel(
-          title: "Saved destinations", actionTitle: "New destination",
-          action: { editor = Editor(kind: .destination) }
-        ) {
-          ForEach(store.destinations, id: \.self) { row in
-            Divider()
-            let resolution = row["resolution"]
-            HStack {
-              Image(systemName: "externaldrive").foregroundStyle(Palette.brand)
-              VStack(alignment: .leading, spacing: 3) {
-                Text(row["name"].text).font(.inter(15, .semibold))
-                Detail(text: row["root_path"].text)
-              }
-              Spacer()
-              StateLabel(word: resolution["state"].text)
-              FerryMenu(title: "Manage") {
-                Button("Check binding") {
-                  store.perform {
-                    let updated = try await store.rpc("dest.resolve", ["id": row["id"]])
-                    if let index = store.destinations.firstIndex(where: { $0["id"] == row["id"] }) {
-                      store.destinations[index] = updated
-                    }
-                  }
-                }
-                Button("Edit…") { editor = Editor(kind: .destination, row: row) }
-                Button("Rebind folder…") {
-                  if let path = pickFolders(multiple: false).first?.path {
-                    mutate("dest.rebind", ["id": row["id"], "path": .string(path)])
-                  }
-                }
-                Button("Archive") { mutate("dest.archive", ["id": row["id"]]) }
-              }
-            }
-            if !resolution["reason"].text.isEmpty {
-              Text(resolution["reason"].text).font(.inter(12))
-            }
+    PageFrame {
+      PageHead(title: "Presets & Destinations")
+    } content: { width in
+      VStack(alignment: .leading, spacing: Space.s7) {
+        VStack(spacing: 0) {
+          HStack(alignment: .bottom) {
+            UnderlineTabs(
+              choices: ["All", "Destinations", "Presets"], selection: $scope,
+              counts: ["Destinations": store.destinations.count, "Presets": store.presets.count])
+            Spacer()
+          }
+          Hairline(color: Palette.rule2)
+        }
+        if scope != "Presets" { destinations(width) }
+        if scope != "Destinations" {
+          presets
+          if let row = store.presets.first(where: { $0["id"].text == previewID }) ?? store.presets.first {
+            preview(row)
           }
         }
       }
-      if scope != "Destinations" {
-        Panel(title: "Organization presets") {
-          ForEach(store.presets, id: \.self) { row in
-            HStack {
-              VStack(alignment: .leading) {
-                Text(row["name"].text).font(.inter(16, .semibold))
-                Detail(text: "Revision \(row["latest_revision"].count)")
-              }
-              Spacer()
-              PillButton(title: "Open") { editor = Editor(kind: .preset, row: row) }
-              Button("Export…") {
-                let panel = NSSavePanel()
-                panel.allowedContentTypes = [.json]
-                panel.nameFieldStringValue = row["name"].text + ".json"
-                guard panel.runModal() == .OK, let url = panel.url else { return }
-                store.perform {
-                  let data = try await store.rpc("preset.export", ["id": row["id"]])
-                  try data.pretty.write(to: url, atomically: true, encoding: .utf8)
-                }
-              }
-            }
-            Divider()
-          }
-          HStack {
-            PillButton(title: "New preset", role: .primary) { editor = Editor(kind: .preset) }
-            PillButton(title: "Import JSON…") {
-              let panel = NSOpenPanel()
-              panel.allowedContentTypes = [.json]
-              guard panel.runModal() == .OK, let url = panel.url else { return }
-              store.perform {
-                let doc = try JSONDecoder().decode(JSON.self, from: Data(contentsOf: url))
-                _ = try await store.rpc("preset.import", ["json": doc])
-                try await store.refresh()
-              }
-            }
-            PillButton(title: "Bind camera…") { editor = Editor(kind: .camera) }
-          }
-        }
-        if let row = store.presets.first(where: { $0["id"].text == previewID })
-          ?? store.presets.first
-        {
-          Panel(title: "Preview saved revision") {
-            FerryMenu(title: row["name"].text) {
-              ForEach(store.presets, id: \.self) { p in
-                Button(p["name"].text) { previewID = p["id"].text }
-              }
-            }
-            PresetPreview(store: store, row: row)
-          }
-        }
-      }
-    }.sheet(item: $editor) { editor in
+    }
+    .sheet(item: $editor) { editor in
       switch editor.kind {
       case .destination: DestinationEditor(store: store, row: editor.row)
       case .preset: PresetEditor(store: store, row: editor.row)
@@ -115,6 +48,153 @@ struct Library: View {
       }
     }
   }
+
+  // MARK: Destinations
+
+  private func destinations(_ width: CGFloat) -> some View {
+    VStack(alignment: .leading, spacing: Space.s4) {
+      SectionTitle(title: "Saved destinations", count: store.destinations.count) {
+        Button {
+          editor = Editor(kind: .destination)
+        } label: {
+          Label("New destination", systemImage: "plus")
+        }
+        .buttonStyle(.park(.standard, .small))
+      }
+      LazyVGrid(
+        columns: Array(
+          repeating: GridItem(.flexible(), spacing: Space.s4, alignment: .top),
+          count: width >= 900 ? 3 : 2),
+        alignment: .leading, spacing: Space.s4
+      ) {
+        ForEach(store.destinations, id: \.self) { row in destinationCard(row) }
+      }
+      if store.destinations.isEmpty {
+        Quiet("Save a destination to land offloads in the same place every time.")
+      }
+    }
+  }
+
+  private func destinationCard(_ row: JSON) -> some View {
+    let resolution = row["resolution"]
+    return VStack(alignment: .leading, spacing: Space.s4) {
+      HStack(alignment: .top, spacing: Space.s3) {
+        IconDisc(symbol: row["peer_id"].text.isEmpty ? "externaldrive" : "desktopcomputer", size: 42)
+        VStack(alignment: .leading, spacing: 4) {
+          Text(row["name"].text).font(.inter(TypeScale.md, .semibold)).foregroundStyle(Palette.bone)
+            .lineLimit(1)
+          Detail(text: row["root_path"].text)
+        }
+        Spacer(minLength: 0)
+        MoreMenu(help: "Manage \(row["name"].text)") {
+          Button("Check binding") {
+            store.perform {
+              let updated = try await store.rpc("dest.resolve", ["id": row["id"]])
+              if let index = store.destinations.firstIndex(where: { $0["id"] == row["id"] }) {
+                store.destinations[index] = updated
+              }
+            }
+          }
+          Button("Edit…") { editor = Editor(kind: .destination, row: row) }
+          Button("Rebind folder…") {
+            if let path = pickFolders(multiple: false).first?.path {
+              mutate("dest.rebind", ["id": row["id"], "path": .string(path)])
+            }
+          }
+          Divider()
+          Button("Archive") { mutate("dest.archive", ["id": row["id"]]) }
+        }
+      }
+      HStack(spacing: Space.s2) {
+        StatusPill(word: resolution["state"].text)
+        if !resolution["reason"].text.isEmpty {
+          Text(resolution["reason"].text).font(.inter(TypeScale.xs)).foregroundStyle(Palette.ink3)
+            .lineLimit(2)
+        }
+      }
+    }
+    .padding(Space.s5)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(GlassSurface(radius: 20))
+  }
+
+  // MARK: Presets
+
+  private var presets: some View {
+    VStack(alignment: .leading, spacing: Space.s3) {
+      SectionTitle(title: "Organization presets", count: store.presets.count) {
+        HStack(spacing: Space.s2) {
+          Button("Import JSON…") {
+            let panel = NSOpenPanel()
+            panel.allowedContentTypes = [.json]
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            store.perform {
+              let doc = try JSONDecoder().decode(JSON.self, from: Data(contentsOf: url))
+              _ = try await store.rpc("preset.import", ["json": doc])
+              try await store.refresh()
+            }
+          }
+          .buttonStyle(.park(.quiet, .small))
+          Button("Bind camera…") { editor = Editor(kind: .camera) }
+            .buttonStyle(.park(.standard, .small))
+          Button {
+            editor = Editor(kind: .preset)
+          } label: {
+            Label("New preset", systemImage: "plus")
+          }
+          .buttonStyle(.park(.primary, .small))
+        }
+      }
+      VStack(spacing: 0) {
+        ForEach(store.presets, id: \.self) { row in
+          Hairline()
+          HStack(spacing: Space.s4) {
+            IconDisc(symbol: "square.stack.3d.up")
+            VStack(alignment: .leading, spacing: 4) {
+              Text(row["name"].text).font(.inter(TypeScale.base, .semibold)).foregroundStyle(Palette.ink1)
+              Text("Revision \(row["latest_revision"].count)").font(.inter(TypeScale.xs))
+                .foregroundStyle(Palette.ink3)
+            }
+            Spacer()
+            Button("Export…") {
+              let panel = NSSavePanel()
+              panel.allowedContentTypes = [.json]
+              panel.nameFieldStringValue = row["name"].text + ".json"
+              guard panel.runModal() == .OK, let url = panel.url else { return }
+              store.perform {
+                let data = try await store.rpc("preset.export", ["id": row["id"]])
+                try data.pretty.write(to: url, atomically: true, encoding: .utf8)
+              }
+            }
+            .buttonStyle(.park(.quiet, .small))
+            Button("Open") { editor = Editor(kind: .preset, row: row) }
+              .buttonStyle(.park(.standard, .small))
+          }
+          .padding(.vertical, Space.s3)
+        }
+        Hairline()
+      }
+      if store.presets.isEmpty { Quiet("No presets yet.") }
+    }
+  }
+
+  private func preview(_ row: JSON) -> some View {
+    VStack(alignment: .leading, spacing: Space.s4) {
+      HStack(alignment: .center, spacing: Space.s3) {
+        CardTitle("Preview a saved revision")
+        Spacer()
+        GlassMenu(title: row["name"].text, icon: "square.stack.3d.up", size: .small) {
+          ForEach(store.presets, id: \.self) { p in
+            Button(p["name"].text) { previewID = p["id"].text }
+          }
+        }
+      }
+      PresetPreview(store: store, row: row)
+    }
+    .padding(Space.s6)
+    .background(GlassSurface(radius: 20))
+  }
+
   func mutate(_ method: String, _ params: JSON) {
     store.perform {
       _ = try await store.rpc(method, params)
@@ -122,6 +202,7 @@ struct Library: View {
     }
   }
 }
+
 private struct DestinationEditor: View {
   let store: Store
   let row: JSON
@@ -129,16 +210,18 @@ private struct DestinationEditor: View {
   @State private var name = ""
   @State private var path = ""
   @State private var message = ""
+
   var body: some View {
-    SheetPage(title: "Saved destination") {
-      TextField("Name", text: $name)
-      HStack {
-        TextField("Folder", text: $path)
+    SheetPage(title: "Saved destination", height: 380) {
+      FieldLabel("Name")
+      TextField("Studio archive", text: $name)
+      FieldLabel("Folder")
+      HStack(spacing: Space.s2) {
+        TextField("/Volumes/…", text: $path)
         Button("Choose…") { if let url = pickFolders(multiple: false).first { path = url.path } }
+          .buttonStyle(.standard)
       }
-      PillButton(
-        title: "Save destination", role: .primary, enabled: !name.isEmpty && path.hasPrefix("/")
-      ) {
+      Button("Save destination") {
         var fields: [String: JSON] = ["name": .string(name), "path": .string(path)]
         for (k, v) in [
           ("id", "id"), ("preset_id", "pinned_preset_id"), ("preset_rev", "pinned_preset_rev"),
@@ -153,29 +236,31 @@ private struct DestinationEditor: View {
           } catch { message = error.localizedDescription }
         }
       }
-      Text(message)
-    }.onAppear {
+      .buttonStyle(.primary)
+      .disabled(name.isEmpty || !path.hasPrefix("/"))
+      if !message.isEmpty { Text(message).foregroundStyle(Palette.warn) }
+    }
+    .onAppear {
       name = row["name"].text
       path = row["root_path"].text
     }
   }
 }
+
 private struct CameraEditor: View {
   let store: Store
   @State private var fields = [String: String]()
   @State private var message = ""
   @Environment(\.dismiss) var dismiss
   let keys = ["make", "model", "serial", "role"]
+
   var body: some View {
-    SheetPage(title: "Bind camera role") {
+    SheetPage(title: "Bind camera role", height: 460) {
       ForEach(keys, id: \.self) { key in
-        TextField(
-          key.capitalized, text: Binding(get: { fields[key] ?? "" }, set: { fields[key] = $0 }))
+        FieldLabel(key.capitalized)
+        TextField(key.capitalized, text: Binding(get: { fields[key] ?? "" }, set: { fields[key] = $0 }))
       }
-      PillButton(
-        title: "Save binding", role: .primary,
-        enabled: keys.allSatisfy { !(fields[$0] ?? "").isEmpty }
-      ) {
+      Button("Save binding") {
         Task {
           do {
             _ = try await store.rpc("camera.bind", .object(fields.mapValues(JSON.string)))
@@ -183,24 +268,26 @@ private struct CameraEditor: View {
           } catch { message = error.localizedDescription }
         }
       }
-      Text(message)
+      .buttonStyle(.primary)
+      .disabled(!keys.allSatisfy { !(fields[$0] ?? "").isEmpty })
+      if !message.isEmpty { Text(message).foregroundStyle(Palette.warn) }
     }
   }
 }
+
 private struct PresetEditor: View {
   let store: Store
   let row: JSON
   @State private var json = ""
   @State private var message = ""
   @Environment(\.dismiss) var dismiss
+
   var body: some View {
-    SheetPage(title: row["name"].text.isEmpty ? "New preset" : row["name"].text) {
-      Text("Rules, groups & exclusions").font(.inter(15, .semibold))
-      TextEditor(text: $json).font(.system(size: 12, design: .monospaced)).frame(height: 220)
-      PillButton(
-        title: row["builtin"] == .bool(true) ? "Save as new preset" : "Save revision",
-        role: .primary, enabled: !json.isEmpty
-      ) {
+    SheetPage(title: row["name"].text.isEmpty ? "New preset" : row["name"].text, width: 640, height: 680) {
+      FieldLabel("Rules, groups & exclusions")
+      TextEditor(text: $json).font(.mono(12)).scrollContentBackground(.hidden)
+        .padding(Space.s3).frame(height: 240).parkField(radius: 14)
+      Button(row["builtin"] == .bool(true) ? "Save as new preset" : "Save revision") {
         Task {
           do {
             let doc = try JSONDecoder().decode(JSON.self, from: Data(json.utf8))
@@ -212,11 +299,15 @@ private struct PresetEditor: View {
           } catch { message = error.localizedDescription }
         }
       }
+      .buttonStyle(.primary)
+      .disabled(json.isEmpty)
       if row["id"] != .null {
+        Hairline()
         PresetPreview(store: store, row: row)
       }
-      Text(message)
-    }.task {
+      if !message.isEmpty { Text(message).foregroundStyle(Palette.warn) }
+    }
+    .task {
       if row["id"] != .null {
         do { json = try await store.rpc("preset.get", ["id": row["id"]])["preset"].pretty } catch {
           message = error.localizedDescription
@@ -232,6 +323,7 @@ private struct PresetEditor: View {
   }
 }
 
+/// Sample paths through a preset's saved revision: before, after and what would happen.
 private struct PresetPreview: View {
   let store: Store
   let row: JSON
@@ -239,31 +331,43 @@ private struct PresetPreview: View {
   @State private var label = "Camera A"
   @State private var message = ""
   @State private var preview: [JSON] = []
-  var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      HStack {
-        ColumnLabel("Source")
-        TextField("Source label", text: $label)
-        TextField("Sample paths (one per line)", text: $paths, axis: .vertical)
-      }
-      Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
-        GridRow {
-          ColumnLabel("Before")
-          ColumnLabel("After")
-          ColumnLabel("Action")
-        }
-        ForEach(preview, id: \.self) { r in
-          Divider()
-          GridRow {
-            Text(r["rel"].text)
-            Text(r["dest_rel"].text)
-            StateLabel(word: r["action"].text)
-          }
-        }
-      }
 
+  var body: some View {
+    VStack(alignment: .leading, spacing: Space.s4) {
+      HStack(alignment: .top, spacing: Space.s3) {
+        VStack(alignment: .leading, spacing: Space.s2) {
+          FieldLabel("Source label")
+          TextField("Source label", text: $label).frame(width: 180)
+        }
+        VStack(alignment: .leading, spacing: Space.s2) {
+          FieldLabel("Sample paths, one per line")
+          TextField("Sample paths (one per line)", text: $paths, axis: .vertical)
+        }
+      }
+      VStack(spacing: 0) {
+        HStack {
+          FieldLabel("Before").frame(maxWidth: .infinity, alignment: .leading)
+          FieldLabel("After").frame(maxWidth: .infinity, alignment: .leading)
+          FieldLabel("Action").frame(width: 110, alignment: .trailing)
+        }
+        .padding(.bottom, Space.s2)
+        ForEach(preview, id: \.self) { r in
+          Hairline()
+          HStack {
+            Detail(text: r["rel"].text, color: Palette.ink2).frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 6) {
+              Image(systemName: "arrow.right").font(.system(size: 8, weight: .bold)).foregroundStyle(Palette.accent)
+              Detail(text: r["dest_rel"].text, color: Palette.ink1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            StatusPill(word: r["action"].text).frame(width: 110, alignment: .trailing)
+          }
+          .padding(.vertical, 10)
+        }
+      }
       if !message.isEmpty { Text(message).foregroundStyle(Palette.warn) }
-    }.task(id: [row["id"].text, String(row["latest_revision"].count), label, paths]) {
+    }
+    .task(id: [row["id"].text, String(row["latest_revision"].count), label, paths]) {
       guard row["id"] != .null else { return }
       do {
         message = ""

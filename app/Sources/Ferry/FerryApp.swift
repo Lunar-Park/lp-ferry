@@ -64,10 +64,6 @@ struct Host: NSViewRepresentable {
   let store: Store
   func makeNSView(context: Context) -> NSHostingView<MainShell> {
     let host = FirstMouseHostingView(rootView: MainShell(store: store))
-    DispatchQueue.main.async {
-      host.window?.titlebarAppearsTransparent = true
-      host.window?.titleVisibility = .hidden
-    }
     if let directory = Snapshots.directory {
       Task { await Snapshots.capture(host, store: store, into: directory) }
     }

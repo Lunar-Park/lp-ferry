@@ -4,7 +4,7 @@
 > **Date:** 2026-11-23  
 > **Repo:** `/Users/dspury/Lunar-Park/lp-ferry` (branch `feat/go-v2-backend`, baseline `f336a7d`)  
 > **Protocol Contract:** [`docs/IPC-PROTOCOL.md`](IPC-PROTOCOL.md) (JSON-RPC 2.0 over `~/.ferry/ferry.sock`, protocol v1)  
-> **Visual Reference:** `/Users/dspury/Lunar-Park/park/apple/Sources/ParkKit/Theme.swift`, `/Users/dspury/Lunar-Park/lp-slate/app/Sources/Slate/Theme.swift`, `SlateButtons.swift`, `TitleBar.swift`, `SessionSidebar.swift`
+> **Visual Reference:** the Lunar Park style kit in `park/apple/Sources/ParkKit/` (`RoomShader.swift`, `Glass.swift`, `Theme.swift`) and `park/apple/Sources/ParkNative/` (`Buttons.swift`, `Shell.swift`, `Dashboard.swift`), and `park/docs/design/park-ui/park-desk.png`, `park-tools-v2.png`, `park-inbox.png`
 
 ---
 
@@ -16,28 +16,29 @@ Build a **standalone, native SwiftUI macOS app** (`lp-ferry/app/` → `dist/Ferr
 
 ## 2. Unified Park / Slate Visual Design System (Mandatory Styling Spec)
 
-Ferry uses the maritime colors measured in the legacy brand guide and calibrated in the R-7/R-8 renderer. The rail mark follows the paths of `assets/brand/ferry-logo-black.svg`.
+Ferry carries a standalone port of the Lunar Park style kit in `app/Sources/Ferry/Design/` (no SwiftPM dependency on `../park`), retuned to the maritime colours measured in the legacy brand guide. The ship mark follows the paths of `assets/brand/ferry-logo-black.svg`, drawn in the app icon's two tones.
 
-### 2.1 Color tokens
+### 2.1 Color tokens (`Design/Theme.swift`)
 
-- Recess the rail in `#0A1A2F`. Wash the `#142035` room with `#1E3350` from the upper left.
-- Build glass from `#1E2C48` over `#1D2B47`, with a directional sheen, `#3D4F74` rim and `#6E7C90` control edges.
-- Set the wordmark in bone and Ferry blue. Reserve interactive blue `#54A4E7` for filled actions, the active pipeline stage and progress.
-- Pair status words and glyphs with emerald for success, blue for activity, amber for approval or review, violet for attention and coral for failure.
+- The room is computed by `FerryRoomShader`: graphite-navy `#162235` → `#131C2B` → `#101722`, washed with steel blue `#75A1C6` at the upper left and a sea-slate swell at the lower right, with a wandering cool light and orbs of wake mist `#9EC5E6`, deep sea slate and dusk. No grain.
+- Ink: bone `#F6F5F2` for titles and the mark, body `#EDEBE6`, then three cooler steps, each clearing 4.5:1 on the room and the glass.
+- Ferry blue `#75A1C6` is the one accent, for the primary action and the mark; words on accent-tinted glass are ice blue `#C4E0F6`. The current place's disc is mist `#DCE5EA` with a deep ferry-blue `#2D5A83` glyph.
+- Status is shape first (a glyph and a word on a faint wash of its colour): green for verified, wake mist for running, amber for approval, violet for attention, coral for failure.
 
 ### 2.2 Typography & Layout Rhythm
 - **Font:** Self-hosted `Inter.woff2` bundled in `Ferry.app/Contents/Resources/Inter.woff2` (registered via `CTFontManagerRegisterFontsForURL`), with clean system fallback if absent in unit tests.
   - Scale: `xs = 12`, `sm = 14`, `base = 15`, `md = 17`, `lg = 22`, `xl = 30`.
-  - Section headers: `10.5–11 pt`, `.semibold`, uppercase, `.tracking(0.7)`, `ink4` (or `warn` for Attention/Approvals).
+  - Page titles `30` semibold bone in the head band; section titles `22` semibold; body `15`; small labels `12` medium in sentence case.
   - ALL numbers (bytes, MB/s, file counts, ETAs, percentages, timestamps) MUST use `.monospacedDigit()`.
   - Paths, SHA-256/BLAKE3 digests, peer IDs, and template tokens use `.system(size: ..., design: .monospaced)`.
 - **Spacing Scale (`Space`):** `4, 8, 12, 16, 20, 24, 32, 48`.
 
 ### 2.3 Surfaces, Glass, Buttons & Window Chrome
-- `FerryRoom` carries a static fine grain across the navy wash. Panels use the same light direction as Slate's smoked-glass surfaces.
-- `PillButton`, `Segments` and `FerryMenu` carry the interaction styling through sheets, tables and the composer.
-
-- **Window Chrome:** Dark `.preferredColorScheme(.dark)` full-size-content window (`titlebarAppearsTransparent = true`, `titleVisibility = .hidden`), unified custom titlebar (`WindowDragArea` + `FirstMouseHostingView`), overlay scrollers (`OverlayScrollers` hiding track bars at rest), and a clean `MenuBarExtra` status icon showing active transfer count / pending agent approvals badge.
+- **Room and glass (`Design/Glass.swift`, `Design/FerryRoomShader.swift`):** one Metal view draws the living room for the whole window. Every `GlassSurface` reports its frame; the shader bends, frosts (five taps) and colour-fringes the room inside each pane, with a lens rim, and drops a soft shadow outside it. Panes inside a `GlassScroll` stop bending where the scroll view ends. `RoomRenderer.snapshot` draws the same pass into an image, so fixture screenshots show the real refraction. `FERRY_STILL=1` holds the room still.
+- **Hierarchy:** primary lists (sources & peers, recent transfers, the `plan.tree`, the activity log, presets) sit open on the room, split by `white @ 7%` hairlines. Glass is kept for what is raised: the transfer crossing now, approval cards, endpoint and destination cards, inspectors, sheets.
+- **Buttons and fields (`Design/Buttons.swift`):** `ParkButtonStyle` only: `primary` (ferry-blue tinted glass pill, lit blue rim, ice-blue words), `standard` (clear glass pill), `quiet` (words, a faint wash on hover), `destructive` (coral-tinted glass). Hover lifts a point, press scales to 0.97. Inputs are `parkField` sunk pills; menus are `GlassMenu` glass pills, never the grey system pop-up.
+- **Shell (`Design/Shell.swift`):** no sidebar box. The rail is 40 pt glass discs on the traffic lights' axis (`Page.gutter = 28`), the current place a mist disc; Dashboard carries the ship. One open `Head.band = 64` head carries the page title, and the corner holds three glass discs: search, approvals (with its count) and this Mac's daemon (status dot; opens Ferry Doctor). Ferry Doctor also sits at the foot of the rail.
+- **Window chrome:** full-size-content window with a transparent title bar; `WindowChrome` centres the traffic lights in the head band. `FirstMouseHostingView`, `WindowDragArea` and overlay scrollers stay. The `MenuBarExtra` shows active transfers and pending approvals.
 
 ---
 
@@ -56,8 +57,8 @@ lp-ferry/app/
 │   │   └── Formatters.swift       # Cached byte/rate/ETA/relative-time formatters
 │   └── Ferry/                     # SwiftUI macOS App
 │       ├── FerryApp.swift         # App entry, WindowGroup, MenuBarExtra, UNUserNotificationCenter for agent approvals
-│       ├── Design/                # FerryTheme.swift, Glass.swift, PillButton.swift, StatusGlyph.swift, WindowChrome.swift
-│       ├── Shell/                 # MainShell.swift (Left Rail + Primary Canvas + Right Inspector), TitleBar.swift
+│       ├── Design/                # Theme, FerryRoomShader, Glass, Buttons, Shell, LineIcon, Components, ShipMark, Window
+│       ├── MainShell.swift        # Room + glass-disc rail + open head band + page, corner discs
 │       ├── Views/
 │       │   ├── TransferWorkspaceView.swift   # Unified local, multi-dest fan-out & P2P send composer + Plan trigger
 │       │   ├── PlanTreeView.swift            # Lazy-paged Before → After `plan.tree` browser + conflict/camera/exclusion resolution

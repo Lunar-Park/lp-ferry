@@ -1,8 +1,41 @@
 import SwiftUI
 
-/// Vector outlines from assets/brand/ferry-logo-black.svg.
+/// Vector outlines from assets/brand/ferry-logo-black.svg. The mark is drawn in two tones the
+/// way the app icon draws it: the wake and the cargo bars in ferry blue, the hull and the
+/// cargo box in bone (`ShipLogo`). Each part is its own shape so either can be filled alone.
 struct ShipMark: Shape {
+  enum Part { case all, wakeAndCargo, hull, box }
+  var part: Part = .all
+
   func path(in rect: CGRect) -> Path {
+    let whole = outline(in: rect)
+    guard part != .all else { return whole }
+    // Subpaths in the SVG's order: long wake, three cargo bars, short wake, then the hull and
+    // its window, then the cargo box and its slot.
+    var pieces: [Path] = []
+    whole.forEach { element in
+      if case .move = element { pieces.append(Path()) }
+      guard !pieces.isEmpty else { return }
+      switch element {
+      case .move(let to): pieces[pieces.count - 1].move(to: to)
+      case .line(let to): pieces[pieces.count - 1].addLine(to: to)
+      case .quadCurve(let to, let control): pieces[pieces.count - 1].addQuadCurve(to: to, control: control)
+      case .curve(let to, let c1, let c2): pieces[pieces.count - 1].addCurve(to: to, control1: c1, control2: c2)
+      case .closeSubpath: pieces[pieces.count - 1].closeSubpath()
+      }
+    }
+    var result = Path()
+    let wanted: ClosedRange<Int> =
+      switch part {
+      case .wakeAndCargo, .all: 0...4
+      case .hull: 5...6
+      case .box: 7...8
+      }
+    for (index, piece) in pieces.enumerated() where wanted.contains(index) { result.addPath(piece) }
+    return result
+  }
+
+  private func outline(in rect: CGRect) -> Path {
     var hull = Path()
     hull.move(to: CGPoint(x: 619.27, y: 474.19))
     hull.addLine(to: CGPoint(x: 604.66, y: 467.29))
@@ -276,5 +309,20 @@ struct ShipMark: Shape {
       CGAffineTransform(
         a: scale, b: 0, c: 0, d: scale, tx: rect.midX - 516.51 * scale,
         ty: rect.midY - 249.195 * scale))
+  }
+}
+
+/// The mark in its two tones, sized by its frame (its aspect is about 2.07 : 1).
+struct ShipLogo: View {
+  var wake: Color = Palette.accent
+  var hull: Color = Palette.bone
+
+  var body: some View {
+    ZStack {
+      ShipMark(part: .wakeAndCargo).fill(wake)
+      ShipMark(part: .hull).fill(hull, style: FillStyle(eoFill: true))
+      ShipMark(part: .box).fill(hull, style: FillStyle(eoFill: true))
+    }
+    .accessibilityLabel("File Ferry")
   }
 }

@@ -2,130 +2,198 @@ import CoreImage.CIFilterBuiltins
 import FerryCore
 import SwiftUI
 
+/// Drives and paired machines as open lists on the room, each row with Path Radar's route.
 struct Machines: View {
-  let store: Store
-  var overview = false
+  @Bindable var store: Store
   @State private var scope = "All"
   @State private var pairing = false
-  @State private var remotePath = ""
-  @State private var revoke: JSON?
-  @State private var sendPeer: JSON?
-  @State private var measured = [String: JSON]()
+
   var body: some View {
-    Panel(title: overview ? "Connected sources & peers" : "Devices & Path Radar") {
-      if !overview { Segments(choices: ["All", "Drives", "Peers"], selection: $scope) }
-      Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: overview ? 7 : 12) {
-        GridRow {
-          ColumnLabel("Source / peer").frame(maxWidth: .infinity, alignment: .leading)
-          ColumnLabel("Transport")
-          ColumnLabel("Free")
-          Color.clear.frame(width: 1, height: 1)
+    PageFrame {
+      PageHead(title: "Machines & Drives") {
+        Button {
+          pairing = true
+        } label: {
+          Label("Pair machine", systemImage: "plus")
+        }
+        .buttonStyle(.primary)
+      }
+    } content: { width in
+      VStack(alignment: .leading, spacing: Space.s7) {
+        VStack(spacing: 0) {
+          HStack(alignment: .bottom) {
+            UnderlineTabs(
+              choices: ["All", "Drives", "Peers"], selection: $scope,
+              counts: ["Drives": store.drives.count, "Peers": store.peers.count])
+            Spacer()
+          }
+          Hairline(color: Palette.rule2)
         }
         if scope != "Peers" {
-          ForEach(store.drives, id: \.self) { drive in
-            Divider()
-            GridRow {
-              device(
-                drive["card"] == .null ? "externaldrive" : "sdcard",
-                URL(fileURLWithPath: drive["mount_path"].text).lastPathComponent,
-                drive["mount_path"].text)
-              TransportBadge(text: driveKind(drive))
-              Text(Format.bytes(drive["free_bytes"].count)).font(.inter(12))
-              PillButton(title: "Plan Offload") {
-                let source = Location(path: drive["mount_path"].text)
-                if !store.sources.contains(source) { store.sources.append(source) }
-                store.review = nil
-                store.section = "Transfer"
+          VStack(alignment: .leading, spacing: Space.s3) {
+            SectionTitle("Drives", count: store.drives.count)
+            VStack(spacing: 0) {
+              ForEach(store.drives, id: \.self) { drive in
+                Hairline()
+                DriveRow(store: store, drive: drive)
               }
+              Hairline()
             }
+            if store.drives.isEmpty { Quiet("No mounted drives reported.") }
           }
         }
         if scope != "Drives" {
-          ForEach(store.peers, id: \.self) { peer in
-            Divider()
-            GridRow {
-              device(
-                "desktopcomputer", peer["name"].text, overview ? "Paired machine" : peer["id"].text
-              ).help("Last seen " + peer["last_seen"].text)
-              TransportBadge(text: routeLabel(peer["active_path"]))
-              Text("—").foregroundStyle(Palette.ink4)
-              HStack {
-                PillButton(title: "Send") {
-                  remotePath = ""
-                  sendPeer = peer
-                }
-                if !overview {
-                  FerryMenu(title: "More") {
-                    Button("Probe routes") {
-                      store.perform {
-                        measured[peer["id"].text] = try await store.rpc(
-                          "peer.probe", ["peer_id": peer["id"]])
-                      }
-                    }
-                    Button("Revoke access…") { revoke = peer }
-                  }
-                }
+          VStack(alignment: .leading, spacing: Space.s3) {
+            SectionTitle("Paired machines", count: store.peers.count)
+            VStack(spacing: 0) {
+              ForEach(store.peers, id: \.self) { peer in
+                Hairline()
+                PeerRow(store: store, peer: peer)
               }
+              Hairline()
             }
-            if !overview, let report = measured[peer["id"].text] {
-              Text(report["error"].text.isEmpty ? report["info"].text : report["error"].text)
-              ForEach(report["measurements"].rows, id: \.self) { m in
-                Detail(
-                  text:
-                    "\(m["badge"].text) · \(m["addr"].text) · \(String(format:"%.1f",m["rtt"].double / 1_000_000)) ms · \(Format.bytes(Int64(m["bps"].double)))/s \(m["error"].text)"
-                )
-              }
-            }
+            if store.peers.isEmpty { Quiet("No paired machines. Pair one to send over the LAN or Tailscale.") }
           }
         }
       }
-      if store.drives.isEmpty && scope != "Peers" { Text("No mounted drives reported") }
-      if store.peers.isEmpty && scope != "Drives" { Text("No paired machines") }
-      if !overview {
-        Divider()
-        PillButton(title: "Pair machine", role: .primary) { pairing = true }
-      }
-    }.sheet(isPresented: $pairing) { PairSheet(store: store) }
-      .sheet(isPresented: Binding(get: { sendPeer != nil }, set: { if !$0 { sendPeer = nil } })) {
-        SheetPage(title: "Send to " + (sendPeer?["name"].text ?? "")) {
-          TextField("Destination path on peer", text: $remotePath)
-          PillButton(title: "Use destination", role: .primary, enabled: remotePath.hasPrefix("/")) {
-            if let peer = sendPeer {
-              let target = Location(
-                path: remotePath, peerID: peer["id"].text, label: peer["name"].text)
-              if !store.targets.contains(target) { store.targets.append(target) }
-            }
-            store.review = nil
-            sendPeer = nil
-            store.section = "Transfer"
-          }
-        }
-      }
-      .confirmationDialog(
-        "Revoke this peer’s access?",
-        isPresented: Binding(get: { revoke != nil }, set: { if !$0 { revoke = nil } }),
-        presenting: revoke
-      ) { peer in
-        Button("Revoke " + peer["name"].text, role: .destructive) {
-          store.perform {
-            _ = try await store.rpc("peer.remove", ["peer_id": peer["id"]])
-            try await store.refresh()
-          }
-        }
-      }
+    }
+    .sheet(isPresented: $pairing) { PairSheet(store: store) }
   }
-  func device(_ symbol: String, _ name: String, _ subtitle: String) -> some View {
-    HStack(spacing: 10) {
-      Image(systemName: symbol).foregroundStyle(Palette.brand).frame(width: 30, height: 30)
-        .background(Palette.rail, in: RoundedRectangle(cornerRadius: 7))
-      VStack(alignment: .leading, spacing: 3) {
-        Text(name).font(.inter(14, .semibold)).lineLimit(1)
-        Text(subtitle).font(.inter(11)).foregroundStyle(Palette.ink3).lineLimit(1).truncationMode(
-          .middle)
+}
+
+/// One mounted drive: what it is, where it is mounted, how much room is left, and the way to
+/// offload it.
+struct DriveRow: View {
+  let store: Store
+  let drive: JSON
+  var compact = false
+
+  var body: some View {
+    let mount = drive["mount_path"].text
+    HStack(spacing: Space.s4) {
+      IconDisc(symbol: drive["card"] == .null ? "externaldrive" : "sdcard")
+      VStack(alignment: .leading, spacing: 4) {
+        Text(URL(fileURLWithPath: mount).lastPathComponent).font(.inter(TypeScale.base, .semibold))
+          .foregroundStyle(Palette.ink1).lineLimit(1)
+        Detail(text: mount)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      TransportBadge(text: driveKind(drive)).frame(width: 150, alignment: .leading)
+      VStack(alignment: .trailing, spacing: 6) {
+        Text(Format.bytes(drive["free_bytes"].count) + " free").font(.inter(TypeScale.sm))
+          .foregroundStyle(Palette.ink2)
+        if !compact {
+          Meter(fraction: share, color: Palette.accent, height: 4).frame(width: 90)
+        }
+      }
+      .frame(width: compact ? 90 : 110, alignment: .trailing)
+      Button("Plan offload") {
+        let source = Location(path: mount)
+        if !store.sources.contains(source) { store.sources.append(source) }
+        store.review = nil
+        store.section = Place.transfer.rawValue
+      }
+      .buttonStyle(.park(.standard, .small))
+      .frame(width: 112, alignment: .trailing)
+    }
+    .padding(.vertical, compact ? 10 : Space.s3)
+  }
+
+  /// Free space against the roomiest mounted drive.
+  private var share: Double {
+    let largest = store.drives.map { $0["free_bytes"].double }.max() ?? 0
+    return drive["free_bytes"].double / max(1, largest)
+  }
+}
+
+/// One paired machine: its name, the route Path Radar chose, and the ways to use it.
+struct PeerRow: View {
+  let store: Store
+  let peer: JSON
+  var compact = false
+  @State private var sending = false
+  @State private var revoking = false
+  @State private var remotePath = ""
+  @State private var measured: JSON?
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: Space.s2) {
+      HStack(spacing: Space.s4) {
+        IconDisc(symbol: "desktopcomputer")
+        VStack(alignment: .leading, spacing: 4) {
+          Text(peer["name"].text).font(.inter(TypeScale.base, .semibold)).foregroundStyle(Palette.ink1)
+            .lineLimit(1)
+          Text(compact ? "Paired machine" : seen).font(.inter(TypeScale.xs))
+            .foregroundStyle(Palette.ink3).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        TransportBadge(text: routeLabel(peer["active_path"])).frame(width: 150, alignment: .leading)
+        Text(compact ? "" : peer["id"].text).font(.mono(11)).foregroundStyle(Palette.ink4)
+          .lineLimit(1).truncationMode(.middle)
+          .frame(width: compact ? 90 : 110, alignment: .trailing)
+        HStack(spacing: Space.s1) {
+          if !compact {
+            MoreMenu(help: "More for \(peer["name"].text)") {
+              Button("Probe routes") {
+                store.perform {
+                  measured = try await store.rpc("peer.probe", ["peer_id": peer["id"]])
+                }
+              }
+              Button("Revoke access…") { revoking = true }
+            }
+          }
+          Button("Send") {
+            remotePath = ""
+            sending = true
+          }
+          .buttonStyle(.park(.standard, .small))
+        }
+        .frame(width: 112, alignment: .trailing)
+      }
+      if let report = measured {
+        VStack(alignment: .leading, spacing: 4) {
+          Text(report["error"].text.isEmpty ? report["info"].text : report["error"].text)
+            .font(.inter(TypeScale.xs)).foregroundStyle(Palette.ink3)
+          ForEach(report["measurements"].rows, id: \.self) { m in
+            Detail(
+              text:
+                "\(m["badge"].text) · \(m["addr"].text) · \(String(format: "%.1f", m["rtt"].double / 1_000_000)) ms · \(Format.bytes(Int64(m["bps"].double)))/s \(m["error"].text)"
+            )
+          }
+        }
+        .padding(.leading, 36 + Space.s4)
+      }
+    }
+    .padding(.vertical, compact ? 10 : Space.s3)
+    .help(peer["last_seen"].text.isEmpty ? "" : "Last seen " + peer["last_seen"].text)
+    .sheet(isPresented: $sending) {
+      SheetPage(title: "Send to " + peer["name"].text, height: 300) {
+        FieldLabel("Destination path on \(peer["name"].text)")
+        TextField("/Volumes/…", text: $remotePath)
+        Button("Use destination") {
+          let target = Location(path: remotePath, peerID: peer["id"].text, label: peer["name"].text)
+          if !store.targets.contains(target) { store.targets.append(target) }
+          store.review = nil
+          sending = false
+          store.section = Place.transfer.rawValue
+        }
+        .buttonStyle(.primary)
+        .disabled(!remotePath.hasPrefix("/"))
+      }
+    }
+    .confirmationDialog("Revoke this peer’s access?", isPresented: $revoking) {
+      Button("Revoke " + peer["name"].text, role: .destructive) {
+        store.perform {
+          _ = try await store.rpc("peer.remove", ["peer_id": peer["id"]])
+          try await store.refresh()
+        }
       }
     }
   }
 
+  private var seen: String {
+    peer["last_seen"].text.isEmpty ? "Paired machine" : "Seen " + peer["last_seen"].text
+  }
 }
 
 struct PairSheet: View {
@@ -136,16 +204,17 @@ struct PairSheet: View {
   @State private var pasted = ""
   @State private var message = ""
   @Environment(\.dismiss) var dismiss
+
   var body: some View {
-    SheetPage(title: "Pair machine") {
+    SheetPage(title: "Pair machine", height: 600) {
       Segments(
         choices: ["Invite", "Join"],
         selection: Binding(get: { join ? "Join" : "Invite" }, set: { join = $0 == "Join" }))
       if join {
+        Text("Paste the invite the other machine shows. It works once, and only while it lasts.")
+          .font(.inter(TypeScale.sm)).foregroundStyle(Palette.ink3)
         TextField("ferry://pair/…", text: $pasted)
-        PillButton(
-          title: "Join machine", role: .primary, enabled: pasted.hasPrefix("ferry://pair/")
-        ) {
+        Button("Join machine") {
           Task {
             do {
               _ = try await store.rpc("peer.pair.complete", ["code": .string(pasted)])
@@ -154,8 +223,12 @@ struct PairSheet: View {
             } catch { message = error.localizedDescription }
           }
         }
+        .buttonStyle(.primary)
+        .disabled(!pasted.hasPrefix("ferry://pair/"))
       } else {
-        PillButton(title: "Create invite", role: .primary) {
+        Text("Create a single-use invite, then join it from the other machine.")
+          .font(.inter(TypeScale.sm)).foregroundStyle(Palette.ink3)
+        Button("Create invite") {
           Task {
             do {
               let invite = try await store.rpc("peer.pair.start")
@@ -164,41 +237,51 @@ struct PairSheet: View {
             } catch { message = error.localizedDescription }
           }
         }
+        .buttonStyle(.primary)
         if !code.isEmpty {
-          if let image = qr {
-            Image(nsImage: image).interpolation(.none).resizable().frame(
-              width: image.size.width, height: image.size.height
-            )
-            .padding(16).background(.white)
-          }
-          Detail(text: code)
-          Button("Copy invite") { copyText(code) }
-          TimelineView(.periodic(from: .now, by: 1)) { ctx in
-            let fmt = ISO8601DateFormatter()
-            let date =
-              fmt.date(from: expires)
-              ?? (try? Date(expires, strategy: .iso8601.time(includingFractionalSeconds: true)))
-            if let date {
-              Text("Expires in " + Format.eta(max(0, Int64(date.timeIntervalSince(ctx.date)))))
-            } else {
-              Text("Expires " + expires)
+          HStack(alignment: .top, spacing: Space.s5) {
+            if let image = qr {
+              Image(nsImage: image).interpolation(.none).resizable()
+                .frame(width: 180, height: 180)
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.white))
+            }
+            VStack(alignment: .leading, spacing: Space.s3) {
+              Text(code).font(.mono(12)).foregroundStyle(Palette.ink1).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+              TimelineView(.periodic(from: .now, by: 1)) { context in
+                let date =
+                  ISO8601DateFormatter().date(from: expires)
+                  ?? (try? Date(expires, strategy: .iso8601.time(includingFractionalSeconds: true)))
+                Text(
+                  date.map { "Expires in " + Format.eta(max(0, Int64($0.timeIntervalSince(context.date)))) }
+                    ?? "Expires " + expires
+                )
+                .font(.inter(TypeScale.xs)).foregroundStyle(Palette.ink3)
+              }
+              Button {
+                copyText(code)
+              } label: {
+                Label("Copy invite", systemImage: "doc.on.doc")
+              }
+              .buttonStyle(.park(.standard, .small))
             }
           }
+          .padding(Space.s5)
+          .background(GlassSurface(radius: 20))
         }
       }
       if !message.isEmpty { Text(message).foregroundStyle(Palette.warn) }
     }
   }
+
   var qr: NSImage? {
-    let f = CIFilter.qrCodeGenerator()
-    f.message = Data(code.utf8)
-    guard let img = f.outputImage, let cg = CIContext().createCGImage(img, from: img.extent) else {
-      return nil
-    }
-    let moduleScale = max(1, floor(260 / img.extent.width))
-    return NSImage(
-      cgImage: cg,
-      size: CGSize(width: img.extent.width * moduleScale, height: img.extent.height * moduleScale))
+    let filter = CIFilter.qrCodeGenerator()
+    filter.message = Data(code.utf8)
+    guard let image = filter.outputImage,
+      let cg = CIContext().createCGImage(image, from: image.extent)
+    else { return nil }
+    return NSImage(cgImage: cg, size: image.extent.size)
   }
 }
 
@@ -219,15 +302,4 @@ func routeLabel(_ endpoint: JSON) -> String {
   guard tier > 0 else { return badge }
   let name = tier == 2 && badge == "LAN" ? "Wired LAN" : badge
   return ["Tier " + String(tier), name].filter { !$0.isEmpty }.joined(separator: " · ")
-}
-
-struct TransportBadge: View {
-  let text: String
-  var body: some View {
-    Text(text.isEmpty ? "Route unknown" : text).font(.inter(11, .medium)).foregroundStyle(
-      Palette.brand
-    )
-    .padding(.horizontal, 7).padding(.vertical, 3).background(
-      Palette.rail, in: RoundedRectangle(cornerRadius: 4))
-  }
 }
