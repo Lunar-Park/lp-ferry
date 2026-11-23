@@ -1,0 +1,57 @@
+# Ferry v2 releases: static single binaries, no C toolchain.
+# Tag Go releases v2.x.y (v0.* tags belong to the legacy Python app).
+version: 2
+project_name: ferry
+
+git:
+  # Only v2.* tags version the Go binary.
+  ignore_tags:
+    - "legacy-*"
+    - "v0.*"
+
+snapshot:
+  version_template: "2.0.0-dev+{{ .ShortCommit }}"
+
+before:
+  hooks:
+    - go mod tidy
+    - go test -race -count=1 ./cmd/... ./internal/...
+
+builds:
+  - id: ferry
+    main: ./cmd/ferry
+    binary: ferry
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: ferry
+    formats: [tar.gz]
+    name_template: "ferry_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - SECURITY.md
+      - docs/GO-QUICKSTART.md
+      - docs/IPC-PROTOCOL.md
+      - packaging/ferry.toml.example
+      - packaging/systemd/ferryd.service
+      - packaging/launchd/com.lunarpark.ferryd.plist
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  use: git
+  filters:
+    include:
+      - "^go:"
+
+release:
+  draft: true
+  prerelease: auto

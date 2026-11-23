@@ -944,11 +944,10 @@ type Check struct {
 }
 
 func (d *Daemon) doctor(ctx context.Context) []Check {
-	var out []Check
+	out := LocalChecks(d.opts.Config, d.opts.Paths)
 	add := func(name string, ok bool, detail string, args ...any) {
 		out = append(out, Check{Name: name, OK: ok, Detail: fmt.Sprintf(detail, args...)})
 	}
-	add("runtime", true, "%s %s/%s", runtime.Version(), runtime.GOOS, runtime.GOARCH)
 	var mode string
 	err := d.DB.Read().QueryRowContext(ctx, `PRAGMA journal_mode`).Scan(&mode)
 	add("database", err == nil && mode == "wal", "%s (journal_mode=%s)", d.opts.Paths.DB, mode)
@@ -958,17 +957,55 @@ func (d *Daemon) doctor(ctx context.Context) []Check {
 		add("socket", false, "%v", err)
 	}
 	if d.Node != nil {
-		fi, err := os.Stat(d.opts.Paths.IdentityKey)
-		add("identity", err == nil && fi.Mode().Perm() == 0o600, "%s peer %s", d.opts.Paths.IdentityKey, d.Node.Identity.ID)
-		add("p2p", true, "listening on %v", d.Node.Addrs())
+		add("p2p", true, "peer %s listening on %v", d.Node.Identity.ID, d.Node.Addrs())
 	} else {
 		add("p2p", true, "disabled")
 	}
+	return out
+}
+
+// LocalChecks need no running daemon: runtime, config and key file
+// permissions, readback mode, network paths, and every configured root
+// (exists, readable/writable, probed publish strategy, free space).
+func LocalChecks(cfg config.Config, paths config.Paths) []Check {
+	var out []Check
+	add := func(name string, ok bool, detail string, args ...any) {
+		out = append(out, Check{Name: name, OK: ok, Detail: fmt.Sprintf(detail, args...)})
+	}
+	add("runtime", true, "%s %s/%s", runtime.Version(), runtime.GOOS, runtime.GOARCH)
+	if fi, err := os.Stat(paths.Config); err == nil {
+		add("config", fi.Mode().Perm()&0o022 == 0, "%s mode %v (must not be writable by others)", paths.Config, fi.Mode().Perm())
+	} else {
+		add("config", true, "%s absent: defaults apply (agents closed, no roots exported)", paths.Config)
+	}
+	if fi, err := os.Stat(paths.IdentityKey); err == nil {
+		add("identity", fi.Mode().Perm() == 0o600, "%s mode %v", paths.IdentityKey, fi.Mode().Perm())
+	} else {
+		add("identity", true, "%s not created yet (the daemon creates it on first start)", paths.IdentityKey)
+	}
+	if err := os.MkdirAll(paths.ReceiptsDir, 0o700); err == nil {
+		if f, err := os.CreateTemp(paths.ReceiptsDir, ".doctor-*"); err == nil {
+			_ = f.Close()
+			_ = os.Remove(f.Name())
+			add("receipts", true, "%s writable", paths.ReceiptsDir)
+		} else {
+			add("receipts", false, "%s: %v", paths.ReceiptsDir, err)
+		}
+	} else {
+		add("receipts", false, "%s: %v", paths.ReceiptsDir, err)
+	}
 	add("readback", true, "physical readback mode %s", storage.ReadbackMode)
-	if len(d.opts.Config.Roots) == 0 {
+	eps := p2p.LocalEndpoints(strconv.Itoa(cfg.Daemon.ListenPort))
+	if len(eps) == 0 {
+		add("network", true, "no non-loopback interfaces; peers can only reach this machine via configured addresses")
+	}
+	for _, e := range eps {
+		add("path "+e.Addr, true, "tier %d (%s)", e.Tier, e.Badge)
+	}
+	if len(cfg.Roots) == 0 {
 		add("roots", true, "no [[roots]] configured: nothing is exported to peers or agents")
 	}
-	for _, r := range d.opts.Config.Roots {
+	for _, r := range cfg.Roots {
 		root, err := storage.OpenRoot(r.Path)
 		if err != nil {
 			add("root "+r.Path, false, "%v", err)
@@ -976,7 +1013,11 @@ func (d *Daemon) doctor(ctx context.Context) []Check {
 		}
 		free, _ := storage.FreeBytes(root.Real)
 		if r.Access != config.AccessReadWrite {
-			add("root "+r.Path, true, "read-only, %d bytes free", free)
+			f, err := os.Open(root.Real)
+			if err == nil {
+				_ = f.Close()
+			}
+			add("root "+r.Path, err == nil, "read-only, %d bytes free%s", free, errSuffix(err))
 			continue
 		}
 		dir, err := storage.OpenDir(root, nil, false)

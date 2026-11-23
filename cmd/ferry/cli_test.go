@@ -101,3 +101,29 @@ func TestCLIAgainstDaemon(t *testing.T) {
 		t.Fatalf("dead socket: %d %s", code, errOut)
 	}
 }
+
+func TestDoctorWithoutDaemon(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "NAS")
+	_ = os.MkdirAll(root, 0o755)
+	cfg := filepath.Join(base, "ferry.toml")
+	write := func(body string) {
+		if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("[[roots]]\npath = \"" + root + "\"\naccess = \"rw\"\n")
+	dead := filepath.Join(base, "no.sock")
+	code, out, errOut := ferry(t, "--socket", dead, "--config", cfg, "doctor")
+	if code != 0 || !strings.Contains(out, "rw, publish hardlink") || !strings.Contains(errOut, "local checks only") {
+		t.Fatalf("%d\n%s\n%s", code, out, errOut)
+	}
+	write("[[roots]]\npath = \"" + filepath.Join(base, "missing") + "\"\naccess = \"rw\"\n")
+	if code, out, _ := ferry(t, "--socket", dead, "--config", cfg, "doctor"); code == 0 || !strings.Contains(out, "FAIL") {
+		t.Fatalf("missing root passed doctor: %d %s", code, out)
+	}
+	write("[daemon]\nlisten_prot = 1\n")
+	if code, _, errOut := ferry(t, "--socket", dead, "--config", cfg, "doctor"); code == 0 || !strings.Contains(errOut, "listen_prot") {
+		t.Fatalf("unknown key not named: %d %s", code, errOut)
+	}
+}

@@ -1,0 +1,28 @@
+# Ferry v2 configuration: ~/.ferry/ferry.toml
+#
+# Unknown keys are an error (the daemon refuses to start and names the
+# key): a typo in a safety setting never silently becomes a default.
+# This is a different file from the legacy Python ferry.toml.example.
+
+[daemon]
+listen_port = 9410        # P2P (mTLS 1.3) listener
+checksum_algo = "sha256"  # "sha256" | "blake3" — always recorded in receipts
+# socket = "/absolute/path/ferry.sock"
+# db = "/absolute/path/ferry.db"          # FERRY_DB overrides
+# receipts_dir = "/absolute/path/receipts"
+
+# Folders this machine exposes to paired peers and agents. Nothing outside
+# these is readable or writable over the network, grant or not.
+[[roots]]
+path = "/Volumes/Shuttle"
+access = "rw"
+
+[[roots]]
+path = "/Volumes/CameraCards"
+access = "ro"
+
+[agent_policy]
+# Agents can never delete sources or overwrite destinations, whatever this says.
+auto_approve_saved_destinations = true
+auto_approve_max_bytes = 536870912000  # 500 GiB; larger waits for a human
+allow_unsaved_destinations = false     # unsaved folders wait for a human

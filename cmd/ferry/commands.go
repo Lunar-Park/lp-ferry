@@ -484,14 +484,16 @@ func doctorCmd(g *globalFlags) *cobra.Command {
 				return &exitError{code: 1, err: fmt.Errorf("config: %w", err)}
 			}
 			fmt.Fprintf(cmd.ErrOrStderr(), "config %s ok (%d roots)\n", paths.Config, len(cfg.Roots))
-			c, err := g.dial(cmd.Context())
-			if err != nil {
-				return &exitError{code: 1, err: err}
-			}
-			defer func() { _ = c.Close() }()
 			var checks []daemon.Check
-			if err := c.Call(cmd.Context(), "doctor.run", nil, &checks); err != nil {
-				return err
+			if c, err := g.dial(cmd.Context()); err == nil {
+				defer func() { _ = c.Close() }()
+				if err := c.Call(cmd.Context(), "doctor.run", nil, &checks); err != nil {
+					return err
+				}
+			} else {
+				// No daemon: still check everything that does not need one.
+				fmt.Fprintf(cmd.ErrOrStderr(), "daemon not running (%s); local checks only\n", paths.Socket)
+				checks = daemon.LocalChecks(cfg, paths)
 			}
 			bad := 0
 			for _, ch := range checks {

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Ferry v2 daemon as a per-user LaunchAgent (macOS).
+
+  Install:
+    install -m 0755 ferry /usr/local/bin/ferry
+    cp com.lunarpark.ferryd.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.lunarpark.ferryd.plist
+
+  Remove:
+    launchctl bootout gui/$(id -u)/com.lunarpark.ferryd
+
+  It runs as you, so the CLI, `ferry mcp` and the app all reach
+  ~/.ferry/ferry.sock. Logs: `log show --predicate 'process == "ferry"'`.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.lunarpark.ferryd</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/bin/ferry</string>
+		<string>daemon</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+	<key>ExitTimeOut</key>
+	<integer>30</integer>
+	<key>ProcessType</key>
+	<string>Standard</string>
+	<key>LowPriorityIO</key>
+	<false/>
+	<key>Umask</key>
+	<integer>63</integer>
+</dict>
+</plist>

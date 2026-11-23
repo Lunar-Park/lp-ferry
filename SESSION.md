@@ -16,7 +16,16 @@ so. The Python/Electron code stays untouched until Phase 5. Tag
 - **Phase 2 done:** `internal/metadata`, `preset`, `planner`, migration 0002. T2.1–T2.6 pass under `-race`.
 - **Phase 3 done:** `internal/p2p`, migration 0003, engine push/pull. T3.1–T3.5 pass under `-race` on loopback (real Ed25519 mTLS 1.3, real mDNS). **T3.6 (real two-machine run) is held until D approves deployment.**
 - **Phase 4 done:** `internal/daemon`, `ipc`, `policy`, `mcp`, the full `cmd/ferry` CLI and [`docs/IPC-PROTOCOL.md`](docs/IPC-PROTOCOL.md). T4.1–T4.3 pass under `-race`, and the built binary was smoke-tested end to end (daemon, doctor, send, verify, MCP over stdio, SIGTERM).
-- **Stopped before Phase 5**, on purpose: no Python/Electron files deleted, nothing pushed. D reviews first. Phase 5 needs: packaging (systemd/launchd/goreleaser), the Park thin adapter, legacy retirement and the README rewrite.
+- **Phase 5, non-destructive half done:**
+  - packaging: `packaging/systemd/ferryd.service` (notify, hardened), `packaging/launchd/com.lunarpark.ferryd.plist`, `packaging/ferry.toml.example` (tested to load)
+  - `.goreleaser.yaml`: validated, with a snapshot build; legacy tags ignored, snapshots versioned `2.0.0-dev+<commit>`
+  - `ferry doctor` works without a daemon
+  - `docs/GO-QUICKSTART.md`, plus a README pointer
+- **Held for D:**
+  - deleting `desktop/`, `src/file_ferry/`, the legacy tests and scripts
+  - converting `park_plugins/ferry/` (~3.3k lines, with proxy/Resolve jobs and tests that call `jobs.stage`/`jobs.land`) into a thin adapter
+  - the full README rewrite
+  - any push
 
 ## Where things are
 

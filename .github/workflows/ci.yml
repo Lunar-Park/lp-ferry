@@ -200,3 +200,10 @@ jobs:
       - name: Static cross-builds
         if: matrix.os == 'ubuntu-latest'
         run: make cross
+
+      - name: Release config check
+        if: matrix.os == 'ubuntu-latest'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: '~> v2'
+          args: check

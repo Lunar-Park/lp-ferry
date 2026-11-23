@@ -5,7 +5,8 @@ GO        ?= go
 # ./... would also match a Go package vendored under desktop/node_modules.
 PKG       := ./cmd/... ./internal/...
 BIN       := bin/ferry
-VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+# Go releases are tagged v2.*; older v0.* tags belong to the Python app.
+VERSION   ?= $(shell git describe --tags --match 'v2.*' --always --dirty 2>/dev/null || echo dev)
 LDFLAGS   := -s -w -X main.version=$(VERSION)
 TARGETS   := linux/amd64 linux/arm64 darwin/arm64 darwin/amd64
 

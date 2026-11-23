@@ -1,5 +1,7 @@
 # file-ferry
 
+> **Ferry v2 (Go) is in development** on `feat/go-v2-backend`: a single static `ferry` binary (daemon, CLI, MCP server, machine-to-machine transport) that will replace the Python and Electron code once it reaches parity. See [docs/GO-QUICKSTART.md](docs/GO-QUICKSTART.md). Everything below describes the current Python app.
+
 Park integration: this repository provides ingest, transfers, proxies and Resolve tooling. Park owns the integrated
 workspace in `park/app/workspaces/ferry/`; the plugin ships operations, data and adapters,
 without another copy of the Park UI. Existing standalone tools remain available where

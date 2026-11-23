@@ -160,3 +160,14 @@ func TestRootFor(t *testing.T) {
 		t.Fatal("cleaned path escaping root must not match")
 	}
 }
+
+// The shipped example must always load under the strict parser.
+func TestShippedExampleParses(t *testing.T) {
+	cfg, err := LoadFile(filepath.Join("..", "..", "packaging", "ferry.toml.example"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Roots) != 2 || cfg.AgentPolicy.AllowUnsavedDestinations {
+		t.Fatalf("%+v", cfg)
+	}
+}
