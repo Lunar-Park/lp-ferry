@@ -136,7 +136,7 @@ const itemSelect = `SELECT i.id, i.transfer_target_id, i.plan_entry_id, i.status
 	e.id, e.plan_dest_id, e.source_root, e.source_rel, e.source_path, e.dest_rel_path, e.action,
 	COALESCE(e.matched_rule,''), COALESCE(e.group_id,''), COALESCE(e.conflict_kind,''), COALESCE(e.exclusion_reason,''),
 	e.excluded_by_user, COALESCE(e.camera_role,''), e.size, e.mtime_ns, e.entry_kind, COALESCE(e.expected_hash,''),
-	COALESCE(e.renamed_from,''), COALESCE(e.warning,''), COALESCE(e.source_label,''), COALESCE(e.metadata_json,'')
+	COALESCE(e.renamed_from,''), COALESCE(e.warning,''), COALESCE(e.source_label,''), COALESCE(e.metadata_json,''), e.source_peer
 	FROM transfer_items i JOIN plan_entries e ON e.id = i.plan_entry_id
 	JOIN transfer_targets t ON t.id = i.transfer_target_id`
 
@@ -158,7 +158,7 @@ func GetItems(ctx context.Context, q querier, transferID string) ([]model.Transf
 			&it.Error, &it.Warning, &it.Attempts,
 			&e.ID, &e.PlanDestID, &e.SourceRoot, &e.SourceRel, &e.SourcePath, &e.DestRelPath, &e.Action,
 			&e.MatchedRule, &e.GroupID, &e.ConflictKind, &e.ExclusionReason, &e.ExcludedByUser, &e.CameraRole, &e.Size, &e.MtimeNS,
-			&e.Kind, &e.ExpectedHash, &e.RenamedFrom, &e.Warning, &e.SourceLabel, &e.MetadataJSON); err != nil {
+			&e.Kind, &e.ExpectedHash, &e.RenamedFrom, &e.Warning, &e.SourceLabel, &e.MetadataJSON, &e.SourcePeer); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}

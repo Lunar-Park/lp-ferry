@@ -14,7 +14,8 @@ so. The Python/Electron code stays untouched until Phase 5. Tag
 - **Phase 1 done:** `internal/storage`, `identity`, `ledger`, `engine`, `receipt`, `verify`, plus `ferry verify`. T1.1–T1.8 pass under `go test -race` on macOS, with 20× stress runs on engine, ledger and storage.
 - **Linux:** vetted, linted and test-compiled, but **not executed** (Docker wasn't running). The CI ubuntu leg runs them on the first push.
 - **Phase 2 done:** `internal/metadata`, `preset`, `planner`, migration 0002. T2.1–T2.6 pass under `-race`.
-- **Next:** Phase 3 (P2P), then Phase 4 (daemon/IPC/CLI/MCP). Stop before Phase 5.
+- **Phase 3 done:** `internal/p2p`, migration 0003, engine push/pull. T3.1–T3.5 pass under `-race` on loopback (real Ed25519 mTLS 1.3, real mDNS). **T3.6 (real two-machine run) is held until D approves deployment.**
+- **Next:** Phase 4 (daemon/IPC/CLI/MCP). Stop before Phase 5.
 
 ## Where things are
 
@@ -26,6 +27,7 @@ so. The Python/Electron code stays untouched until Phase 5. Tag
 - `internal/metadata`: MP4/MOV, EXIF, BWF/iXML, Sony XML readers; card fingerprinting; vendor-pattern companions.
 - `internal/preset`: glob dialect, templates, routing engine, built-ins, immutable revisions.
 - `internal/planner`: scanner, conflict matrix, approve/revise, `plan.tree`. Tests: `planner_test.go` (T2.x).
+- `internal/p2p`: identity, pairing, grants, Path Radar, HTTP/2 handlers, pull/push, mDNS, plus the adapter implementing the planner and engine `Remote` interfaces. Tests: `p2p_test.go` (T3.x).
 - Gate: `make vet lint race cross`.
 
 ## Decisions
@@ -42,8 +44,12 @@ so. The Python/Electron code stays untouched until Phase 5. Tag
 - Companion sidecars pair only by documented vendor naming (Sony `M01.XML`, GoPro `.THM`/`.LRV`, DJI `.SRT`/`.LRF`). Nothing is paired by guessing from a shared basename.
 - A missing `{capture_date}` routes to the fallback with a warning finding. `{a|b}` alternatives are opt-in, and the fallback template must always render.
 - macOS volume identity comes from `statfs` `f_mntonname`, because firmlinks put `/private/var` on the Data volume, not the sealed `/`. Mount writability is the read-only flag, and source/destination overlap is checked by inode.
+- P2P trust is pinned Ed25519 keys only: no CA, and `VerifyConnection` with session tickets off, so every handshake re-proves the key. Pairing is a single-use 128-bit secret proven by HMAC over the TLS exporter on both sides.
+- Grants are signed by the source and bound to transfer, grantee, item list and expiry. Items are rechecked against allowed roots with lstat containment on every request, and the client refuses all redirects.
+- Push is used when the source is local (the card is read once for every target). Pull/land is used when the source is a peer, so a coordinator carries no file bytes. A pull resumes from the job-owned temp's size, and the source hashes the prefix locally so the trailer is always a whole-file SHA-256.
+- Path Radar retries a downed path only when nothing else answers, so a brief drop on the only link resumes instead of failing.
 - Phase-1 limits, made explicit rather than faked:
-  - Remote targets are refused at create (Phase 3).
+  - Remote targets: `skip_identical` isn't offered (keep_both instead). Remote crash-window reconcile re-checks on the peer via `/v1/verify`.
   - `needs_review` entries are refused at approval and at transfer start. `skip_identical` re-proves the checksum at run time.
   - No hot-plug watcher or link speed yet.
   - The `verifying` transfer state isn't emitted.

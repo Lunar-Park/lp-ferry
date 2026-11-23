@@ -175,6 +175,7 @@ type PlanEntry struct {
 	RenamedFrom     string `json:"renamed_from,omitempty"`
 	Warning         string `json:"warning,omitempty"`
 	SourceLabel     string `json:"source_label,omitempty"`
+	SourcePeer      string `json:"source_peer,omitempty"`
 	MetadataJSON    string `json:"metadata,omitempty"`
 }
 

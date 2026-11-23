@@ -63,6 +63,8 @@ type Runner struct {
 	// ClassOf reports a path's storage class for scheduling; nil = unknown.
 	ClassOf func(path string) identity.StorageClass
 	Hooks   Hooks
+	// Remote reaches other machines; nil means local transfers only.
+	Remote Remote
 }
 
 // Result summarizes a finished run.
@@ -117,9 +119,30 @@ func (r *Runner) Create(ctx context.Context, planID, fingerprint, actor string) 
 	byDest := map[string]string{}
 	var keys [][2]string
 	realRoot := map[string]string{}
+	peerOf := map[string]string{}
+	for _, e := range plan.Entries {
+		if !isLocal(e.SourcePeer) && r.Remote == nil {
+			return "", fmt.Errorf("plan entry %d reads from peer %s but this runner has no P2P transport", e.ID, e.SourcePeer)
+		}
+	}
 	for _, d := range plan.Destinations {
-		if d.PeerID != model.LocalPeer && d.PeerID != "" {
-			return "", fmt.Errorf("destination %s is on peer %s; remote targets arrive with the P2P transport", d.ID, d.PeerID)
+		if !isLocal(d.PeerID) {
+			if r.Remote == nil {
+				return "", fmt.Errorf("destination %s is on peer %s but this runner has no P2P transport", d.Label, d.PeerID)
+			}
+			if !storage.Strategy(d.PublishStrategy).Valid() {
+				return "", fmt.Errorf("destination %s on %s has no probed publish strategy; replan", d.Label, d.PeerID)
+			}
+			g := model.TransferTarget{
+				ID: newID("tgt_"), TransferID: t.ID, PlanDestID: d.ID, Label: d.Label, PeerID: d.PeerID,
+				RootPath: d.RootPath, TransportKind: "p2p", PublishStrategy: d.PublishStrategy, ReadbackMode: ReadbackRemote,
+				Status: model.TransferQueued,
+			}
+			targets = append(targets, g)
+			byDest[d.ID] = g.ID
+			realRoot[d.ID] = d.RootPath
+			peerOf[d.ID] = d.PeerID
+			continue
 		}
 		root, err := storage.OpenRoot(d.RootPath)
 		if err != nil {
@@ -145,6 +168,7 @@ func (r *Runner) Create(ctx context.Context, planID, fingerprint, actor string) 
 		targets = append(targets, g)
 		byDest[d.ID] = g.ID
 		realRoot[d.ID] = root.Real
+		peerOf[d.ID] = model.LocalPeer
 	}
 	var items []model.TransferItem
 	for _, e := range plan.Entries {
@@ -154,7 +178,7 @@ func (r *Runner) Create(ctx context.Context, planID, fingerprint, actor string) 
 		}
 		items = append(items, model.TransferItem{TargetID: tid, PlanEntryID: e.ID, Status: model.ItemPending, ChecksumAlgo: plan.ChecksumAlgo})
 		if e.Action != model.ActionExclude {
-			keys = append(keys, [2]string{DestKey(model.LocalPeer, realRoot[e.PlanDestID]), e.DestRelPath})
+			keys = append(keys, [2]string{DestKey(peerOf[e.PlanDestID], realRoot[e.PlanDestID]), e.DestRelPath})
 		}
 	}
 	var conflict *ledger.ReservationConflict
@@ -349,6 +373,9 @@ func (x *run) execute() (*Result, error) {
 	// Bind every target: the root must still be the directory it was when
 	// the transfer was created.
 	for _, s := range x.targets {
+		if !isLocal(s.g.PeerID) {
+			continue // the peer rechecks its own binding before publishing
+		}
 		root, err := storage.OpenRoot(s.g.RootPath)
 		if err == nil && (root.Dev != s.g.RootDev || root.Ino != s.g.RootIno) {
 			err = fmt.Errorf("%w: %s is no longer the directory this transfer was bound to (device %d inode %d, bound %d/%d)",
@@ -420,7 +447,7 @@ func (x *run) units() []*unit {
 		if it.Status != model.ItemPending {
 			continue
 		}
-		key := it.Entry.Action + "\x00" + it.Entry.SourceRoot + "\x00" + it.Entry.SourceRel
+		key := it.Entry.Action + "\x00" + it.Entry.SourcePeer + "\x00" + it.Entry.SourceRoot + "\x00" + it.Entry.SourceRel
 		if it.Entry.Action == model.ActionDir {
 			key += "\x00" + it.TargetID + "\x00" + it.Entry.DestRelPath
 		}
@@ -491,6 +518,10 @@ func (x *run) runUnit(u *unit) {
 			x.makeDir(it)
 		}
 	case model.ActionCopy:
+		if !isLocal(u.entry.SourcePeer) {
+			x.pullUnit(u)
+			return
+		}
 		x.copyUnit(u)
 	case model.ActionSkipIdentical:
 		for _, it := range u.items {
@@ -541,6 +572,15 @@ func (x *run) makeDir(it *model.TransferItem) {
 		x.settleFailure(it, nil, model.ItemFailed, err)
 		return
 	}
+	if !isLocal(s.g.PeerID) {
+		if err := x.r.Remote.Mkdir(x.ctx, s.g.PeerID, x.t.ID, s.g.RootPath, it.Entry.DestRelPath); err != nil {
+			x.settleFailure(it, nil, model.ItemFailed, err)
+			return
+		}
+		it.Status, it.Error = model.ItemVerified, ""
+		_ = x.commitItem(it, s, 0, false)
+		return
+	}
 	parts, err := storage.ValidateRel(it.Entry.DestRelPath)
 	if err == nil {
 		var d *storage.Dir
@@ -567,6 +607,7 @@ type sink struct {
 	res     *storage.Reservation
 	created bool
 	written int64
+	push    RemotePush
 }
 
 func partName(leaf string, itemID int64) string {
@@ -584,6 +625,11 @@ func partName(leaf string, itemID int64) string {
 // cleanup removes job-owned state for a sink: its temp and, under
 // reserve_rename, its own untouched reservation. Never anything else.
 func (k *sink) cleanup() {
+	if k.push != nil {
+		k.push.Abort(errors.New("transfer item aborted"))
+		k.push = nil
+		return
+	}
 	if k.file != nil {
 		_ = k.file.Close()
 		k.file = nil
@@ -640,6 +686,22 @@ func (x *run) copyUnit(u *unit) {
 			x.settleFailure(it, nil, model.ItemFailed, fmt.Errorf("target halted: %w", err))
 			continue
 		}
+		if !isLocal(s.g.PeerID) {
+			it.Status, it.Error, it.Warning, it.PartPath = model.ItemCopying, "", "", ""
+			it.FinalPath = s.g.PeerID + ":" + s.g.RootPath + "/" + it.Entry.DestRelPath
+			it.PublishStrategy, it.SourceHash, it.DestHash, it.BytesCopied = s.g.PublishStrategy, "", "", 0
+			it.Attempts++
+			if err := x.write(func(tx *sql.Tx) error { return ledger.UpdateItem(tx, it) }); err != nil {
+				return
+			}
+			push, err := x.r.Remote.Push(x.ctx, s.g.PeerID, x.t.ID, it.ID, s.g.RootPath, it.Entry.DestRelPath, it.Entry.Size, it.Entry.MtimeNS)
+			if err != nil {
+				x.settleFailure(it, nil, model.ItemFailed, fmt.Errorf("peer %s: %w", s.g.PeerID, err))
+				continue
+			}
+			sinks = append(sinks, &sink{it: it, s: s, push: push})
+			continue
+		}
 		dir, leaf, err := storage.OpenFileIn(s.root, it.Entry.DestRelPath, true)
 		if err != nil {
 			if errors.Is(err, storage.ErrBindingChanged) {
@@ -683,7 +745,7 @@ func (x *run) copyUnit(u *unit) {
 	}
 	live := sinks[:0:0]
 	for _, k := range sinks {
-		if k.file != nil {
+		if k.file != nil || k.push != nil {
 			live = append(live, k)
 		}
 	}
@@ -733,9 +795,13 @@ func (x *run) copyUnit(u *unit) {
 	// 3. Single read, N sinks.
 	writers := make([]io.Writer, len(live))
 	for i, k := range live {
-		writers[i] = k.file
+		var w io.Writer = k.file
+		if k.push != nil {
+			w = k.push
+		}
+		writers[i] = w
 		if x.r.Hooks.WrapSink != nil {
-			writers[i] = x.r.Hooks.WrapSink(k.s.idx, *k.it, k.file)
+			writers[i] = x.r.Hooks.WrapSink(k.s.idx, *k.it, w)
 		}
 		x.tele.Phase(k.s.g.ID, k.it.Entry.DestRelPath, PhaseStreaming)
 	}
@@ -794,6 +860,10 @@ func (x *run) copyUnit(u *unit) {
 }
 
 func (x *run) finishSink(k *sink, sourceHash string, src storage.FileInfo) {
+	if k.push != nil {
+		x.finishRemote(k, sourceHash, src.Size)
+		return
+	}
 	it, s := k.it, k.s
 	if err := k.file.Sync(); err != nil {
 		x.settleFailure(it, k, model.ItemFailed, fmt.Errorf("fsync %s: %w", it.PartPath, err))
@@ -1191,6 +1261,10 @@ func (r *Runner) Resume(ctx context.Context, transferID string) (*Result, error)
 	// Re-acquire reservations (released when the transfer last ended).
 	realRoots := map[string]string{}
 	for _, s := range x.targets {
+		if !isLocal(s.g.PeerID) {
+			realRoots[s.g.ID] = s.g.RootPath
+			continue
+		}
 		root, err := storage.OpenRoot(s.g.RootPath)
 		if err != nil || root.Dev != s.g.RootDev || root.Ino != s.g.RootIno {
 			if err == nil {
@@ -1209,7 +1283,7 @@ func (r *Runner) Resume(ctx context.Context, transferID string) (*Result, error)
 	var keys [][2]string
 	for _, it := range x.items {
 		if it.Entry.Action != model.ActionExclude {
-			keys = append(keys, [2]string{DestKey(model.LocalPeer, realRoots[it.TargetID]), it.Entry.DestRelPath})
+			keys = append(keys, [2]string{DestKey(x.byID[it.TargetID].g.PeerID, realRoots[it.TargetID]), it.Entry.DestRelPath})
 		}
 	}
 	var conflict *ledger.ReservationConflict
@@ -1259,11 +1333,26 @@ func (r *Runner) Resume(ctx context.Context, transferID string) (*Result, error)
 func (x *run) reconcile() error {
 	for _, it := range x.items {
 		s := x.byID[it.TargetID]
-		switch it.Status {
-		case model.ItemCopying:
-			if err := x.discardOwned(s, it); err != nil {
+		if !isLocal(s.g.PeerID) {
+			before := it.Status
+			if err := x.reconcileRemote(s, it); err != nil {
 				return err
 			}
+			if before != it.Status {
+				if err := x.r.DB.WriteTx(x.ctx, func(tx *sql.Tx) error { return ledger.UpdateItem(tx, it) }); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		switch it.Status {
+		case model.ItemCopying:
+			if isLocal(it.Entry.SourcePeer) {
+				if err := x.discardOwned(s, it); err != nil {
+					return err
+				}
+			}
+			// A pull's temp is kept: the resumed pull continues from it.
 			x.rearm(it)
 		case model.ItemPublishing:
 			if err := x.reconcilePublished(s, it); err != nil {

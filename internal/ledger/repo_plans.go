@@ -59,8 +59,8 @@ func InsertPlan(tx *sql.Tx, p *model.Plan) error {
 	}
 	stmt, err := tx.Prepare(`INSERT INTO plan_entries (plan_id, plan_dest_id, source_root, source_rel, source_path,
 		dest_rel_path, action, matched_rule, group_id, conflict_kind, exclusion_reason, excluded_by_user,
-		camera_role, size, mtime_ns, entry_kind, expected_hash, renamed_from, warning, source_label, metadata_json)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+		camera_role, size, mtime_ns, entry_kind, expected_hash, renamed_from, warning, source_label, metadata_json, source_peer)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -70,10 +70,13 @@ func InsertPlan(tx *sql.Tx, p *model.Plan) error {
 		if e.Kind == "" {
 			e.Kind = "file"
 		}
+		if e.SourcePeer == "" {
+			e.SourcePeer = model.LocalPeer
+		}
 		res, err := stmt.Exec(p.ID, e.PlanDestID, e.SourceRoot, e.SourceRel, e.SourcePath, e.DestRelPath, e.Action,
 			NullString(e.MatchedRule), NullString(e.GroupID), NullString(e.ConflictKind), NullString(e.ExclusionReason),
 			e.ExcludedByUser, NullString(e.CameraRole), e.Size, e.MtimeNS, e.Kind, NullString(e.ExpectedHash),
-			NullString(e.RenamedFrom), NullString(e.Warning), NullString(e.SourceLabel), NullString(e.MetadataJSON))
+			NullString(e.RenamedFrom), NullString(e.Warning), NullString(e.SourceLabel), NullString(e.MetadataJSON), e.SourcePeer)
 		if err != nil {
 			return err
 		}
@@ -267,7 +270,7 @@ func GetPlan(ctx context.Context, q querier, id string) (*model.Plan, error) {
 const entrySelect = `SELECT id, plan_dest_id, source_root, source_rel, source_path, dest_rel_path, action,
 	COALESCE(matched_rule,''), COALESCE(group_id,''), COALESCE(conflict_kind,''), COALESCE(exclusion_reason,''),
 	excluded_by_user, COALESCE(camera_role,''), size, mtime_ns, entry_kind, COALESCE(expected_hash,''),
-	COALESCE(renamed_from,''), COALESCE(warning,''), COALESCE(source_label,''), COALESCE(metadata_json,'') FROM plan_entries`
+	COALESCE(renamed_from,''), COALESCE(warning,''), COALESCE(source_label,''), COALESCE(metadata_json,''), source_peer FROM plan_entries`
 
 type scanner interface{ Scan(dest ...any) error }
 
@@ -275,7 +278,7 @@ func scanEntry(s scanner) (model.PlanEntry, error) {
 	var e model.PlanEntry
 	err := s.Scan(&e.ID, &e.PlanDestID, &e.SourceRoot, &e.SourceRel, &e.SourcePath, &e.DestRelPath, &e.Action,
 		&e.MatchedRule, &e.GroupID, &e.ConflictKind, &e.ExclusionReason, &e.ExcludedByUser, &e.CameraRole, &e.Size, &e.MtimeNS,
-		&e.Kind, &e.ExpectedHash, &e.RenamedFrom, &e.Warning, &e.SourceLabel, &e.MetadataJSON)
+		&e.Kind, &e.ExpectedHash, &e.RenamedFrom, &e.Warning, &e.SourceLabel, &e.MetadataJSON, &e.SourcePeer)
 	return e, err
 }
 

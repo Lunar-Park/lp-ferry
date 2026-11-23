@@ -419,7 +419,7 @@ func (p *Planner) route(dc *destCtx, req model.PlanRequest, si int, inv *Invento
 	for _, e := range inv.Entries {
 		scans[e.Rel] = e
 		base := model.PlanEntry{PlanDestID: dc.pd.ID, SourceRoot: inv.Root, SourceRel: e.Rel, SourcePath: inv.Root + "/" + e.Rel,
-			SourceLabel: inv.Label, Size: e.Size, MtimeNS: e.MtimeNS, Kind: e.Type}
+			SourceLabel: inv.Label, SourcePeer: inv.PeerID, Size: e.Size, MtimeNS: e.MtimeNS, Kind: e.Type}
 		if e.Type != TypeDir {
 			base.Kind = "file"
 		}
@@ -451,7 +451,7 @@ func (p *Planner) route(dc *destCtx, req model.PlanRequest, si int, inv *Invento
 		e := scans[r.Rel]
 		m := inv.Media[r.Rel]
 		en := model.PlanEntry{PlanDestID: dc.pd.ID, SourceRoot: inv.Root, SourceRel: e.Rel, SourcePath: inv.Root + "/" + e.Rel,
-			SourceLabel: inv.Label, Size: e.Size, MtimeNS: e.MtimeNS, Kind: "file", DestRelPath: r.DestRel,
+			SourceLabel: inv.Label, SourcePeer: inv.PeerID, Size: e.Size, MtimeNS: e.MtimeNS, Kind: "file", DestRelPath: r.DestRel,
 			MatchedRule: r.Rule, GroupID: r.GroupID, Warning: r.Warning, MetadataJSON: m.JSON(), CameraRole: roleOf(inv, m)}
 		if e.Type == TypeDir {
 			en.Kind = TypeDir

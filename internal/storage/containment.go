@@ -349,3 +349,20 @@ func OpenFileIn(root *Root, rel string, create bool) (*Dir, string, error) {
 func devOf(st *unix.Stat_t) uint64 { return uint64(st.Dev) } //nolint:unconvert // int32 on darwin
 
 func modeOf(st *unix.Stat_t) uint32 { return uint32(st.Mode) } //nolint:unconvert // uint16 on darwin
+
+// OpenAppend opens (creating if needed) a job-owned file for appending,
+// without following a symlink. Used to resume a network pull into its
+// recorded temp.
+func (d *Dir) OpenAppend(name string) (*os.File, error) {
+	fd, err := unix.Openat(d.fd, name, unix.O_CREAT|unix.O_WRONLY|unix.O_APPEND|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0o600)
+	if err != nil {
+		return nil, &os.PathError{Op: "open", Path: d.Path(name), Err: err}
+	}
+	f := os.NewFile(uintptr(fd), d.Path(name))
+	fi, err := Fstat(f)
+	if err != nil || !fi.IsRegular() {
+		_ = f.Close()
+		return nil, fmt.Errorf("%w: %s", ErrNotRegular, d.Path(name))
+	}
+	return f, nil
+}
