@@ -291,6 +291,10 @@ func (x *run) write(fn func(*sql.Tx) error) error {
 }
 
 func (x *run) load(ctx context.Context, id string) error {
+	// Loading ignores cancellation: a cancel that lands this early must still
+	// reach execute, which records "canceled" and writes the receipt, rather
+	// than abort the read and leave the transfer queued forever.
+	ctx = context.WithoutCancel(ctx)
 	q := x.r.DB.Read()
 	t, err := ledger.GetTransfer(ctx, q, id)
 	if err != nil {

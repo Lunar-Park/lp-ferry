@@ -1,5 +1,7 @@
 # Ferry saved destinations and organization presets — execution specification
 
+> **Still the behavioral contract.** Ferry v2 implements it in Go (`internal/preset`, `internal/planner`, `internal/engine`); references below to Python modules describe the retired implementation (tag `legacy-python-v0.3`).
+
 Status: Draft for implementation and subsequent review; nothing in this document is a shipped claim.
 Date: 2026-09-10
 Baseline inspected: `123aafd` (revalidate HEAD and working tree before execution).

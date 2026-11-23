@@ -1,5 +1,7 @@
 # Sending between machines
 
+> **Superseded in Ferry v2.** `ferry.send` no longer uses Park's stage/land jobs or node file server: the two machines' ferry engines pair (pinned Ed25519 keys, mutual TLS 1.3) and the destination pulls straight from the source under a transfer-scoped grant. See [FERRY-PLUGIN.md](FERRY-PLUGIN.md#sending-between-machines). This page is kept as the record of the decision (direct, never staged on a third machine), which still holds.
+
 Ferry's job is to make moving media reliable and repeatable **for agents**: a card to an SSD, an
 SSD to another SSD, an SSD to another machine. An agent asks for a move; Ferry hashes at both
 ends, so the agent can prove that every byte arrived and nothing was lost or altered in transit,

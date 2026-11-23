@@ -725,3 +725,21 @@ func TestBlake3AndDirsAndExclusions(t *testing.T) {
 		t.Fatal("exclusion not recorded with its reason")
 	}
 }
+
+// A cancel that arrives before the run even loads its state still ends
+// the transfer as canceled with a receipt, never stuck in queued.
+func TestCancelBeforeRunStarts(t *testing.T) {
+	e := newEnv(t)
+	e.write("a.mov", randomBytes(3*ChunkSize))
+	pid, fp := e.plan([]string{"a.mov"}, []string{e.dest("SSD")}, planOpts{})
+	id := e.start(pid, fp)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	res, err := e.runner.Run(ctx, id)
+	if err != nil || res.Status != model.TransferCanceled || res.ReceiptPath == "" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if tr := e.transfer(id); tr.Status != model.TransferCanceled {
+		t.Fatalf("status %s", tr.Status)
+	}
+}

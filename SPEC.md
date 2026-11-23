@@ -1,5 +1,7 @@
 # file-ferry — Spec v0.2.4
 
+> **Historical.** This describes the Python/Electron app retired in Ferry v2; that code is preserved at the `legacy-python-v0.3` tag. Ferry is now the Go binary — see [GO-QUICKSTART.md](docs/GO-QUICKSTART.md).
+
 > **Name:** `file-ferry`
 > **Repo location:** `Lunar-Park/lp-ferry`
 > **Version:** 0.2.4

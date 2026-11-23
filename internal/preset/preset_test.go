@@ -233,7 +233,7 @@ func TestServiceRevisionsAreImmutable(t *testing.T) {
 		t.Fatal("EnsureBuiltins must be idempotent:", err)
 	}
 	list, _ := s.List(ctx)
-	if len(list) != 3 {
+	if len(list) != 4 {
 		t.Fatalf("%+v", list)
 	}
 	r1, err := s.Create(ctx, Builtins()[BuiltinCategory])
@@ -254,5 +254,14 @@ func TestServiceRevisionsAreImmutable(t *testing.T) {
 	imp, err := s.Import(ctx, data)
 	if err != nil || imp.PresetID == r1.PresetID || imp.Hash != r2.Hash {
 		t.Fatalf("import must create a new identity with the same content: %+v %v", imp, err)
+	}
+}
+
+func TestMirrorSourceKeepsTheTree(t *testing.T) {
+	got := route(Builtins()[BuiltinMirror], "Drive-A", files("DCIM/100MEDIA/A001.mov", "notes.txt", "Empty/"))
+	for rel, want := range map[string]string{"DCIM/100MEDIA/A001.mov": "DCIM/100MEDIA/A001.mov", "notes.txt": "notes.txt", "Empty": "Empty"} {
+		if got[rel].DestRel != want {
+			t.Errorf("%s -> %s", rel, got[rel].DestRel)
+		}
 	}
 }

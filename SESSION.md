@@ -16,16 +16,20 @@ so. The Python/Electron code stays untouched until Phase 5. Tag
 - **Phase 2 done:** `internal/metadata`, `preset`, `planner`, migration 0002. T2.1–T2.6 pass under `-race`.
 - **Phase 3 done:** `internal/p2p`, migration 0003, engine push/pull. T3.1–T3.5 pass under `-race` on loopback (real Ed25519 mTLS 1.3, real mDNS). **T3.6 (real two-machine run) is held until D approves deployment.**
 - **Phase 4 done:** `internal/daemon`, `ipc`, `policy`, `mcp`, the full `cmd/ferry` CLI and [`docs/IPC-PROTOCOL.md`](docs/IPC-PROTOCOL.md). T4.1–T4.3 pass under `-race`, and the built binary was smoke-tested end to end (daemon, doctor, send, verify, MCP over stdio, SIGTERM).
-- **Phase 5, non-destructive half done:**
-  - packaging: `packaging/systemd/ferryd.service` (notify, hardened), `packaging/launchd/com.lunarpark.ferryd.plist`, `packaging/ferry.toml.example` (tested to load)
-  - `.goreleaser.yaml`: validated, with a snapshot build; legacy tags ignored, snapshots versioned `2.0.0-dev+<commit>`
-  - `ferry doctor` works without a daemon
-  - `docs/GO-QUICKSTART.md`, plus a README pointer
-- **Held for D:**
-  - deleting `desktop/`, `src/file_ferry/`, the legacy tests and scripts
-  - converting `park_plugins/ferry/` (~3.3k lines, with proxy/Resolve jobs and tests that call `jobs.stage`/`jobs.land`) into a thin adapter
-  - the full README rewrite
-  - any push
+- **Phase 5 done:**
+  - packaging (systemd, launchd, example config) and GoReleaser
+  - `ferry doctor` without a daemon
+  - the Park plugin converted to a thin adapter over the daemon (`park_plugins/ferry/engine.py`); 89 Park tests pass against real daemons
+  - legacy Python/Electron code, tests, scripts and docs removed (preserved at `legacy-python-v0.3`)
+  - README, CONTRIBUTING, RELEASE and FERRY-PLUGIN rewritten; historical docs carry a banner
+- **PR #248 (draft):** rebased onto `main` after #246/#247 (2026-11-23).
+  - The send docs and code drafts that named internal hosts were not replayed; `main`'s public send doc is kept, with a superseded banner.
+  - `SECURITY.md`'s threat model is rewritten for the engine's transport.
+  - CI's park plugin job now runs `tests/park_plugin/test_standalone.py` without Park and reports the Park-dependent tests it skipped.
+- **Not done, waiting on D:**
+  - merge #248
+  - T3.6, a real two-machine run
+  - update `main` branch protection to `go (ubuntu-latest)`, `go (macos-latest)`, `park plugin`
 
 ## Where things are
 
@@ -39,7 +43,8 @@ so. The Python/Electron code stays untouched until Phase 5. Tag
 - `internal/planner`: scanner, conflict matrix, approve/revise, `plan.tree`. Tests: `planner_test.go` (T2.x).
 - `internal/p2p`: identity, pairing, grants, Path Radar, HTTP/2 handlers, pull/push, mDNS, plus the adapter implementing the planner and engine `Remote` interfaces. Tests: `p2p_test.go` (T3.x).
 - `internal/daemon`: service wiring, every RPC method, event bus, drive watcher. `internal/ipc`: socket JSON-RPC. `internal/mcp`: 12-tool stdio server. `internal/policy`: agent rules. Tests: `daemon_test.go` (T4.x), `cmd/ferry/cli_test.go`.
-- Gate: `make vet lint race cross`.
+- `park_plugins/ferry`: `engine.py` (daemon client), `ops.py`/`jobs.py` (Park contract). Tests in `tests/park_plugin` need Park: `PYTHONPATH=../park:. ../park/.venv/bin/python -m pytest tests/park_plugin`.
+- Gate: `make vet lint race cross`, plus `ruff check/format park_plugins tests`.
 
 ## Decisions
 
@@ -64,6 +69,12 @@ so. The Python/Electron code stays untouched until Phase 5. Tag
 - MCP is a lean in-repo stdio implementation (no SDK dependency), with 12 tools all marked `destructiveHint: false`. Nothing anywhere deletes, moves or overwrites.
 - The final `transfer.state` is emitted after the receipt export, so a client reacting to it can open the receipt.
 - Drive hot-plug is a 3 s mount-list poll that emits `drive.mounted` / `drive.unmounted`. There are no FSEvents/udev hooks yet.
+- The Park plugin keeps every op name, event and record. A Park plan id and fingerprint *are* the engine's, so offloads use the `mirror-source` preset (Park's old default layout).
+  - `on_conflict`: `skip` maps to `skip_identical` (different content keeps both), `rename` to `keep_both` (`name (2).ext`). `overwrite` and custom templates are refused.
+  - A file that appears after planning stops the whole plan for replanning; Park's old copier failed only that file.
+- `ferry.send` pairs the two machines' engines through Park calls, then the destination pulls from the source. The source folder must be under the source machine's `[[roots]]`.
+  - Old stage/land jobs are gone. Pre-engine receipts still verify, page-cache only.
+- An engine bug found while converting: a cancel landing before a run loaded its state left the transfer `queued` forever. Loading now ignores cancellation (test `TestCancelBeforeRunStarts`).
 - Phase-1 limits, made explicit rather than faked:
   - Remote targets: `skip_identical` isn't offered (keep_both instead). Remote crash-window reconcile re-checks on the peer via `/v1/verify`.
   - `needs_review` entries are refused at approval and at transfer start. `skip_identical` re-proves the checksum at run time.

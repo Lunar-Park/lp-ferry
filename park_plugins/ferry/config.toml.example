@@ -1,0 +1,43 @@
+# Park plugin configuration (the ferry Park plugin, not the ferry daemon)
+#
+# Copy this file to ./ferry.toml or ~/.ferry/config.toml and customize. Any
+# field can be omitted — defaults are shown. The ferry daemon has its own,
+# separate config: ~/.ferry/ferry.toml (see packaging/ferry.toml.example).
+#
+# proxy_codec / proxy_height / checksum_algo are TOP-LEVEL keys (not under
+# [organize] or [proxy]). ferry also accepts a [proxy] sub-table holding
+# proxy_codec/proxy_height as a convenience, but top-level is the canonical form.
+
+# Where to find the ffmpeg and ffprobe binaries. If unset, the CLI looks
+# for them on PATH.
+# ffmpeg_path = "/opt/homebrew/bin/ffmpeg"
+# resolve_path = "/Applications/DaVinci Resolve.app"
+
+# Proxy generation defaults (used by the proxy command and the TUI).
+proxy_codec = "ProRes422Proxy"  # ProRes variant
+proxy_height = 1080             # target height (aspect preserved)
+# auto | avfoundation | ffmpeg. "auto" uses AVFoundation on macOS (hardware
+# decode + the ProRes engine; needed for H.264 4:2:2 10-bit such as Sony XAVC
+# S 4:2:2, which ffmpeg can only decode in software) and ffmpeg elsewhere.
+# FERRY_PROXY_BACKEND overrides "auto".
+proxy_backend = "auto"
+
+# Accepted for compatibility. Copies are verified by the ferry engine with
+# SHA-256, the hash Park registers, whatever this says.
+checksum_algo = "xxhash"
+
+[organize]
+# Offloads mirror the source under the destination. Other layouts are ferry
+# presets now (`ferry preset list`); a different template here is refused.
+template = "{root}/{source_relpath}/{filename}{ext}"
+
+# What to do when a file with the same name is already at the destination.
+#   skip   - skip it when its full checksum matches; otherwise keep both
+#   rename - keep both: the new file lands as "name (2).ext"
+# Ferry never overwrites, so "overwrite" is refused.
+on_conflict = "skip"
+
+# Whether organize copies sources into the layout (leaving the raw
+# folder intact) or moves them.
+# Options: copy (default) | move
+mode = "copy"

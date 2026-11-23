@@ -7,169 +7,15 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Ferry is the Go binary (cmd/ferry, internal/). The Park plugin
+# (park_plugins/ferry) is a thin Python adapter over the ferry daemon.
+#
+# Branch protection: these jobs replace the retired Python and desktop
+# jobs, so the required check names on `main` must be updated to
+# "go (ubuntu-latest)", "go (macos-latest)" and "park plugin" in the same
+# change, or every PR waits on checks that no longer report.
+
 jobs:
-  test:
-    name: test (py${{ matrix.python-version }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ['3.11', '3.12', '3.13']
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: 'pip'
-          cache-dependency-path: pyproject.toml
-
-      - name: Install ffmpeg
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-          ffmpeg -version | head -1
-
-      - name: Install package
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Lint with ruff
-        run: |
-          ruff check .
-          ruff format --check .
-
-      - name: Type-check with mypy
-        run: mypy src
-
-      - name: Test with pytest
-        run: pytest --cov=file_ferry --cov-report=term-missing
-
-      # tests/park_plugin needs park importable, and park is a separate host
-      # rather than a dependency of this package. Each of those modules skips
-      # on import, which means pytest collects *zero items* from them: the
-      # run is green and the send tests (ferry.send/stage/land) were never
-      # attempted. Count them so the gap is visible in the log instead of
-      # looking like coverage. Do not turn this into a pass/fail on park's
-      # availability; run the suite with park on PYTHONPATH to prove it.
-      - name: Report the Park plugin suite this run did not exercise
-        run: |
-          count=$(grep -rhoE "^[[:space:]]*def test_" tests/park_plugin | wc -l | tr -d ' ')
-          echo "::warning title=Park plugin tests not run::$count park plugin test functions (the machine-to-machine send included) did not run in this job: park is not installed."
-          echo "park plugin test functions: $count; attempted by pytest this run: 0"
-
-  # macOS leg of the Python suite. The package classifies itself
-  # MacOS/POSIX and the operators who run ferry work on macOS, but CI only
-  # ever proved the suite on Linux — and the codebase has real
-  # platform-specific surface (drive detection shells out to `mount` vs
-  # `diskutil`-adjacent paths, volume enumeration, path handling).
-  #
-  # Kept as its own job rather than an `os:` entry in the matrix above so
-  # the existing check names — which branch protection on `main` requires
-  # — stay stable.
-  #
-  # One Python version, not three. macOS runners bill at 10x ubuntu, so this
-  # job was the bulk of the spend while adding the least: it is the same
-  # suite as the ubuntu matrix on a second OS, and the OS is what it exists
-  # to cover, not the interpreter. The ubuntu matrix keeps all three versions.
-  #
-  # Dropping a version REMOVES A REQUIRED CHECK NAME. `test (macos, py3.11)`
-  # and `test (macos, py3.12)` must come out of the required contexts on
-  # `main` in the same change, or every PR blocks forever waiting on a check
-  # that no longer reports.
-  test-macos:
-    name: test (macos, py${{ matrix.python-version }})
-    runs-on: macos-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ['3.13']
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: 'pip'
-          cache-dependency-path: pyproject.toml
-
-      # The macOS runner images already carry ffmpeg for some versions of
-      # the image; brew is a fast no-op when they do.
-      - name: Install ffmpeg
-        run: |
-          brew install ffmpeg
-          ffmpeg -version | head -1
-
-      - name: Install package
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      # ruff and mypy are OS-independent and already gate every Linux leg;
-      # repeating them here only adds minutes. The suite itself — the part
-      # that can behave differently on darwin — is what runs.
-      - name: Test with pytest
-        run: pytest --cov=file_ferry --cov-report=term-missing
-
-  desktop:
-    name: desktop (node${{ matrix.node-version }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # Matches `engines.node: >=22`. The floor is 22 because oxlint loads
-        # the anti-slop plugin as a .ts file, which relies on Node's
-        # TypeScript type-stripping — Node 20 cannot import .ts at all.
-        node-version: ['22']
-
-    defaults:
-      run:
-        working-directory: desktop
-
-    env:
-      # The suite never loads Electron (no test imports it), and neither
-      # tsc nor vite needs the runtime. Skipping the ~100MB binary keeps
-      # the job fast and removes a flaky download from the critical path;
-      # the npm package and its TypeScript types are still installed, so
-      # electron/*.ts is still type-checked.
-      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up Node ${{ matrix.node-version }}
-        uses: actions/setup-node@v7
-        with:
-          node-version: ${{ matrix.node-version }}
-          cache: 'npm'
-          cache-dependency-path: desktop/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Lint (eslint + anti-slop oxlint)
-        run: npm run lint
-
-      - name: Check formatting
-        run: npm run format:check
-
-      - name: Type-check (source and tests)
-        run: npm run typecheck
-
-      - name: Test with vitest
-        run: npm test
-
-      - name: Build
-        run: npm run build
-
-  # Ferry v2 Go engine (docs/GO-BACKEND-REWRITE-PLAN.md). Runs beside the
-  # Python and desktop jobs until Phase 5 retires them, so the existing
-  # required check names stay stable.
   go:
     name: go (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -207,3 +53,36 @@ jobs:
         with:
           version: '~> v2'
           args: check
+
+  park-plugin:
+    name: park plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Lint
+        run: |
+          python -m pip install --upgrade pip ruff pytest
+          ruff check park_plugins tests
+          ruff format --check park_plugins tests
+
+      # test_standalone.py runs here: the manifest, imports without Park, the
+      # config-to-engine mapping and the engine client's wire protocol. The
+      # behavioral modules need Park itself (and build the ferry binary), so
+      # they skip on this runner. Run them with Park on PYTHONPATH:
+      #   PYTHONPATH=../park:. python -m pytest tests/park_plugin
+      - name: Standalone plugin tests
+        run: python -m pytest tests/park_plugin -q
+
+      # A green run must not read as coverage it did not have. Do not turn
+      # this into a pass/fail on Park's availability.
+      - name: Report the Park plugin tests this run did not exercise
+        run: |
+          files=$(grep -l 'importorskip("park"' tests/park_plugin/test_*.py)
+          count=$(grep -hoE "^[[:space:]]*def test_" $files | wc -l | tr -d ' ')
+          echo "::warning title=Park plugin tests not run::$count Park-dependent test functions (offload, send, plan, ingest, machines, proxy, resolve) did not run in this job: park is not installed."

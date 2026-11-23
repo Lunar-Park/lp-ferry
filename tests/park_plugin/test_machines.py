@@ -14,7 +14,9 @@ import pytest
 park = pytest.importorskip("park", reason="park is not installed")
 
 from park.ops import REGISTRY, op  # noqa: E402
-from park_plugins.ferry import jobs  # noqa: E402 - after the park importorskip above
+from park_plugins.ferry import jobs  # noqa: E402
+
+pytestmark = pytest.mark.usefixtures("engine")
 
 
 @pytest.fixture

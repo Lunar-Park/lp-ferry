@@ -5,6 +5,7 @@ const (
 	BuiltinPreserve = "preserve-source-structure"
 	BuiltinCategory = "sort-by-category"
 	BuiltinCamera   = "camera-card-conform"
+	BuiltinMirror   = "mirror-source"
 )
 
 func yes() *bool { b := true; return &b }
@@ -34,6 +35,14 @@ func Builtins() map[string]*Preset {
 			},
 			Fallback:       "Unsorted/{source_label}/{relative_dir}/{filename}",
 			EmptyDirs:      "Unsorted/{source_label}/{relative_dir}/{filename}",
+			ConflictPolicy: KeepBoth,
+		},
+		BuiltinMirror: {
+			Schema: Schema, Name: "Mirror source",
+			Description:    "Recreate the source's folders directly inside the destination, nothing added.",
+			Rules:          []Rule{{ID: "mirror", Template: "{relative_dir}/{filename}"}},
+			Fallback:       "{relative_dir}/{filename}",
+			EmptyDirs:      "{relative_dir}/{filename}",
 			ConflictPolicy: KeepBoth,
 		},
 		BuiltinCamera: {

@@ -1,5 +1,7 @@
 # Architecture Decision Records
 
+> **Historical.** This describes the Python/Electron app retired in Ferry v2; that code is preserved at the `legacy-python-v0.3` tag. Ferry is now the Go binary — see [GO-QUICKSTART.md](../GO-QUICKSTART.md).
+
 This directory holds the frozen architectural decisions for the
 file-ferry vNext implementation. ADRs are written once when a
 decision is made and updated only when the decision itself changes.

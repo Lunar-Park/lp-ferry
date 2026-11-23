@@ -2,8 +2,6 @@
 
 Ferry v2 is one static binary, `ferry`. It runs as a background daemon (`ferry daemon`), and everything else (the CLI, `ferry mcp` for agents, the macOS app) talks to that daemon over a user-only socket. It copies and verifies. It never deletes, moves or overwrites.
 
-> Status: Ferry v2 lives on the `feat/go-v2-backend` branch alongside the legacy Python app. This page covers v2 only.
-
 ## Install
 
 Build from source with Go 1.26+ (no C toolchain needed):

@@ -7,6 +7,11 @@ The fixtures here import park inside the fixture body for the same reason.
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -15,11 +20,91 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 
+# -- the Go engine ---------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def ferry_bin(tmp_path_factory):
+    """The ferry binary from this checkout (or $FERRY_BIN)."""
+    given = os.environ.get("FERRY_BIN")
+    if given and Path(given).is_file():
+        return given
+    go = shutil.which("go")
+    if not go:
+        pytest.skip("the ferry engine needs Go to build")
+    out = tmp_path_factory.mktemp("bin") / "ferry"
+    subprocess.run([go, "build", "-o", str(out), "./cmd/ferry"], cwd=ROOT, check=True)
+    return str(out)
+
+
+class Daemon:
+    """One running ``ferry daemon``: its own home, config, socket and (optionally) P2P."""
+
+    def __init__(self, binary: str, home: Path, roots: list[tuple[str, str]], p2p: bool):
+        self.home = home
+        self.sockdir = tempfile.mkdtemp(prefix="fy", dir="/tmp")  # socket paths are length-limited
+        self.socket = os.path.join(self.sockdir, "ferry.sock")
+        config = home / ".ferry" / "ferry.toml"
+        config.parent.mkdir(parents=True, exist_ok=True)
+        body = "".join(
+            f'[[roots]]\npath = "{path}"\naccess = "{access}"\n' for path, access in roots
+        )
+        config.write_text(body)
+        args = [binary, "--socket", self.socket, "--config", str(config), "daemon"]
+        args += ["--listen", "127.0.0.1:0", "--no-mdns"] if p2p else ["--no-p2p"]
+        env = {**os.environ, "HOME": str(home)}
+        env.pop("FERRY_DB", None)
+        self.proc = subprocess.Popen(args, env=env, stderr=subprocess.PIPE, text=True)
+        deadline = time.monotonic() + 15
+        while not os.path.exists(self.socket):
+            if self.proc.poll() is not None or time.monotonic() > deadline:
+                raise RuntimeError(
+                    f"ferry daemon did not start: {self.proc.stderr.read() if self.proc.poll() is not None else 'timeout'}"
+                )
+            time.sleep(0.02)
+
+    def stop(self) -> None:
+        self.proc.terminate()
+        try:
+            self.proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+        shutil.rmtree(self.sockdir, ignore_errors=True)
+
+
+@pytest.fixture
+def daemons(ferry_bin, tmp_path):
+    """Start ferry daemons: ``daemons(name, roots=[(path, "ro"|"rw")], p2p=False)``."""
+    running: list[Daemon] = []
+
+    def start(name: str = "engine", roots=(), p2p: bool = False) -> Daemon:
+        daemon = Daemon(ferry_bin, tmp_path / f"home-{name}", list(roots), p2p)
+        running.append(daemon)
+        return daemon
+
+    yield start
+    for daemon in running:
+        daemon.stop()
+
+
+@pytest.fixture
+def engine(daemons, ferry_bin, monkeypatch):
+    """This machine's engine: one daemon, and the plugin pointed at it."""
+    daemon = daemons()
+    monkeypatch.setenv("FERRY_SOCKET", daemon.socket)
+    monkeypatch.setenv("FERRY_BIN", ferry_bin)
+    return daemon
+
+
 @pytest.fixture(autouse=True)
 def plugin_source(monkeypatch):
     """Load the plugin from this checkout, whatever is installed in site-packages."""
     monkeypatch.setenv("PARK_PLUGIN_PATHS", str(ROOT))
-    from park.plugins import loader
+    try:
+        from park.plugins import loader
+    except ImportError:  # test_standalone runs without park
+        yield
+        return
 
     loader.reset()
     yield
@@ -107,6 +192,7 @@ def job_context(park, tmp_path):
 @pytest.fixture
 def no_queue():
     """A home whose park has no machines layer: ferry records the work and queues nothing."""
+    import park.machines.jobs  # noqa: F401 - register it first, or a later import would bring it back
     from park.ops import REGISTRY
 
     real = REGISTRY.pop("machines.job.submit", None)
@@ -118,7 +204,7 @@ def no_queue():
 
 
 @pytest.fixture
-def worker_plan(park, call, card, tmp_path):
+def worker_plan(park, call, card, tmp_path, engine):
     """The real broker offers planning to a simulated worker with the fixture card."""
     from park.machines import calls
     from park.machines.contract import LocalCallContext

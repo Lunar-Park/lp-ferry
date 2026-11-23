@@ -1,9 +1,8 @@
-# Ferry v2 (Go). The legacy Python/Electron tooling keeps its own scripts
-# until Phase 5 retires it.
+# Ferry: one static Go binary. The Park plugin (park_plugins/) is linted and
+# tested separately with ruff and pytest (see CONTRIBUTING.md).
 
 GO        ?= go
-# ./... would also match a Go package vendored under desktop/node_modules.
-PKG       := ./cmd/... ./internal/...
+PKG       := ./...
 BIN       := bin/ferry
 # Go releases are tagged v2.*; older v0.* tags belong to the Python app.
 VERSION   ?= $(shell git describe --tags --match 'v2.*' --always --dirty 2>/dev/null || echo dev)

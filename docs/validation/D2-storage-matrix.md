@@ -1,5 +1,7 @@
 # D-2 (§12.2) — real storage matrix: record template
 
+> **Historical.** This describes the Python/Electron app retired in Ferry v2; that code is preserved at the `legacy-python-v0.3` tag. Ferry is now the Go binary — see [GO-QUICKSTART.md](../GO-QUICKSTART.md).
+
 **Status: per gate.** Every gate below is `NOT RUN` until an operator runs it
 and fills the section in; a gate with no entry is `NOT RUN`, not passed. This
 file is the record template, and the dated campaign runs at its foot hold what

@@ -1,5 +1,7 @@
 # D-2 (§12.2) — operator procedure for the six physical gates
 
+> **Historical.** This describes the Python/Electron app retired in Ferry v2; that code is preserved at the `legacy-python-v0.3` tag. Ferry is now the Go binary — see [GO-QUICKSTART.md](../GO-QUICKSTART.md).
+
 This is the step-by-step for the real storage matrix. It can be followed
 without any other context. Fill in
 [`D2-storage-matrix.md`](D2-storage-matrix.md) as you go.

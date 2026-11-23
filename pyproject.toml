@@ -1,76 +1,25 @@
+# The Park plugin only. Ferry itself is the Go binary (cmd/ferry, see Makefile);
+# the plugin is a thin adapter that talks to the local `ferry daemon` over its
+# socket. The distribution keeps its old name so existing Park installs resolve it.
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "file-ferry"  # project name; the typed command is `ferry` (SPEC §14)
-version = "0.2.4"
-description = "Zero-cost CLI for post-production media ops: probe, organize, generate proxies, build DaVinci Resolve projects, and verify backups."
+name = "file-ferry"
+version = "0.4.0"
+description = "Park plugin for ferry: card offloads, machine-to-machine sends, receipts, proxies and Resolve projects, backed by the ferry daemon."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
-authors = [
-    { name = "Lunar Park" },
-]
-keywords = [
-    "video",
-    "media",
-    "post-production",
-    "ffmpeg",
-    "davinci-resolve",
-    "proxy",
-    "checksum",
-    "cli",
-]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: MacOS",
-    "Operating System :: POSIX :: Linux",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Topic :: Multimedia :: Video",
-    "Topic :: Utilities",
-]
-
-dependencies = [
-    "click>=8.1",
-    "pydantic>=2.0",
-    "rich>=13.0",
-    "textual>=0.50",
-    "tomlkit>=0.13",
-    "xxhash>=3.0",
-]
+authors = [{ name = "Lunar Park" }]
+dependencies = []
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-    "pytest-cov>=4.0",
-    "ruff>=0.1",
-    "build>=1.0",
-    "twine>=4.0",
-    "mypy>=1.0",
-    "types-xxhash>=3.0",
-]
-# Optional integrations, declared for documentation and intent. Neither pulls a
-# pip package: DaVinci Resolve has no distribution on PyPI and is detected at
-# runtime via `DaVinciResolveScript` (installed with Resolve itself), and
-# Textual stays in the core dependencies so the TUI always ships. Installing
-# `file-ferry[resolve]` therefore installs nothing extra -- it records that the
-# Resolve code path is opt-in, which is why both the CLI and the TUI
-# lazy-import `file_ferry.resolve`.
-resolve = []
-tui = []
+dev = ["pytest>=7.0", "ruff>=0.1"]
 
-[project.scripts]
-ferry = "file_ferry.cli:main"
-ferry-service = "file_ferry.service.cli:main"
-
-# Park optionally loads the adapter from this entry point. The standalone CLI and
-# desktop sidecar start without the Park host.
+# Park loads the adapter from this entry point (or from PARK_PLUGIN_PATHS).
 [project.entry-points."park.plugins"]
 ferry = "park_plugins.ferry"
 
@@ -80,40 +29,18 @@ Source = "https://github.com/Lunar-Park/lp-ferry"
 Issues = "https://github.com/Lunar-Park/lp-ferry/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/file_ferry", "park_plugins"]
+packages = ["park_plugins"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "tests"]
+src = ["park_plugins", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
 ignore = ["E501"]
 
-[tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101"]  # allow assert in tests
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra -q --strict-markers -m 'not slow'"
-pythonpath = ["src"]
-markers = [
-    # The 100,000-entry synthetic planning run (D-2 §12.2). It writes 100k
-    # files and takes minutes, so it is opt-in: `pytest -m slow`.
-    "slow: long synthetic runs; excluded by default with -m 'not slow'",
-]
-filterwarnings = [
-    # PR #46 fixed #41 by wrapping `created_at` in `_iso()`; PR #54's rewrite
-    # silently reverted it, and the resulting DeprecationWarning fired in the
-    # suite for weeks without failing anything. A raw `datetime` passed to
-    # sqlite3 stops working entirely on a future Python (3.12 deprecates the
-    # default adapter), so make the warning an error to catch regressions.
-    "error:The default datetime adapter is deprecated:DeprecationWarning",
-]
-
-[tool.mypy]
-python_version = "3.11"
-strict = true
-warn_return_any = true
-warn_unused_configs = true
+addopts = "-ra -q --strict-markers"
+pythonpath = ["."]

@@ -1,5 +1,7 @@
 # Destination presets — execution report
 
+> **Historical.** This describes the Python/Electron app retired in Ferry v2; that code is preserved at the `legacy-python-v0.3` tag. Ferry is now the Go binary — see [GO-QUICKSTART.md](GO-QUICKSTART.md).
+
 Companion to [`DESTINATION-PRESETS-PRODUCTION-SPEC.md`](DESTINATION-PRESETS-PRODUCTION-SPEC.md).
 This report records phase status, evidence, decisions, and blockers as work
 proceeds. Statuses are `PASS`, `FAIL`, `NOT RUN`, or `BLOCKED`. Nothing here

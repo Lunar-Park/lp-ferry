@@ -10,6 +10,8 @@ pytest.importorskip("park", reason="park is not installed")
 
 from park_plugins.ferry import probe
 
+pytestmark = pytest.mark.usefixtures("engine")
+
 
 def test_a_card_folder_is_planned(call, card, tmp_path):
     destination = tmp_path / "offload"
@@ -69,16 +71,39 @@ def test_reopening_a_v1_index_replays_existing_plans(tmp_path, card, monkeypatch
     from park.kernel import Park, index
     from park.ops import invoke
     from park.plugins import loader
-    from park_plugins.ferry import config, layout
 
     loader.load_all()
     old_schema = (Path(__file__).parent / "fixtures" / "ferry-plans-v1.sql").read_text()
     home = tmp_path / "existing-home"
     dest = tmp_path / "destination"
+    items = [
+        {
+            "rel": rel,
+            "source": str(card.path / rel),
+            "dest": str(dest / rel),
+            "size": 1,
+            "mtime": 0.0,
+            "kind": probe.kind_for(Path(rel)),
+            "action": "copy",
+            "probe": {},
+        }
+        for rel in card.names
+    ]
     event_data = {
         "id": "old-plan",
         "created": "2026-11-16T12:00:00.000Z",
-        **layout.build(card.path, dest, config.Config(), read_probe=False),
+        "label": "CARD_A",
+        "source": str(card.path),
+        "destination": str(dest),
+        "template": "{root}/{source_relpath}/{filename}{ext}",
+        "on_conflict": "skip",
+        "fingerprint": "0" * 64,
+        "files": len(items),
+        "copies": len(items),
+        "skips": 0,
+        "bytes": len(items),
+        "by_kind": {},
+        "items": items,
     }
 
     def apply_old_plan(conn, event):
@@ -162,8 +187,11 @@ def test_rename_keeps_both_files(call, card, tmp_path):
             "probe": False,
         },
     )
+    # Keep-both: the existing files stay, the new ones land beside them as "name (2).ext".
     assert second["copies"] == len(card.names)
-    assert all("-1." in Path(item["dest"]).name for item in second["items"])
+    assert all(" (2)." in Path(item["dest"]).name for item in second["items"])
+    for item in first["items"]:
+        assert Path(item["dest"]).read_bytes() == b"already here"
 
 
 def test_a_missing_source_is_not_found(call, tmp_path):
@@ -175,7 +203,7 @@ def test_a_missing_source_is_not_found(call, tmp_path):
     assert "not there" in str(caught.value)
 
 
-def test_worker_planning_rejects_overwrite_while_local_planning_keeps_its_config(
+def test_overwrite_is_refused_everywhere_because_the_engine_never_overwrites(
     call,
     card,
     tmp_path,
@@ -183,20 +211,44 @@ def test_worker_planning_rejects_overwrite_while_local_planning_keeps_its_config
 ):
     config_path = tmp_path / "ferry.toml"
     config_path.write_text('[organize]\non_conflict = "overwrite"\n', encoding="utf-8")
-    with pytest.raises(Exception, match=r"Set organize\.on_conflict to 'skip' or 'rename'"):
+    with pytest.raises(Exception, match="never overwrites; use 'skip' or 'rename'"):
         worker_plan(config_path=str(config_path))
+    with pytest.raises(Exception, match="never overwrites"):
+        call(
+            "ferry.plan",
+            {
+                "source": str(card.path),
+                "destination": str(tmp_path / "offload"),
+                "config_path": str(config_path),
+                "probe": False,
+            },
+        )
     assert call("ferry.plan.list") == []
 
-    local = call(
-        "ferry.plan",
-        {
-            "source": str(card.path),
-            "destination": str(tmp_path / "offload"),
-            "config_path": str(config_path),
-            "probe": False,
-        },
+
+def test_a_custom_template_is_refused_with_where_layouts_went(call, card, tmp_path):
+    config_path = tmp_path / "ferry.toml"
+    config_path.write_text(
+        '[organize]\ntemplate = "{root}/{date}/{filename}{ext}"\n', encoding="utf-8"
     )
-    assert local["on_conflict"] == "overwrite"
+    with pytest.raises(Exception, match="Ferry presets"):
+        call(
+            "ferry.plan",
+            {
+                "source": str(card.path),
+                "destination": str(tmp_path / "offload"),
+                "config_path": str(config_path),
+            },
+        )
+
+
+def test_the_plan_is_the_engines_plan(call, card, tmp_path):
+    from park_plugins.ferry import engine
+
+    plan = call("ferry.plan", {"source": str(card.path), "destination": str(tmp_path / "offload")})
+    engine_plan = engine.call("plan.get", {"plan_id": plan["id"]})
+    assert engine_plan["fingerprint"] == plan["fingerprint"]
+    assert engine_plan["destinations"][0]["preset_id"] == "mirror-source"
 
 
 def test_an_empty_source_is_refused(call, tmp_path):
