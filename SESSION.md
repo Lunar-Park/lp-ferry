@@ -14,7 +14,7 @@ so. The Python/Electron code stays untouched until Phase 5. Tag
 - **Phase 1 done:** `internal/storage`, `identity`, `ledger`, `engine`, `receipt`, `verify`, plus `ferry verify`. T1.1–T1.8 pass under `go test -race` on macOS, with 20× stress runs on engine, ledger and storage.
 - **Linux:** vetted, linted and test-compiled, but **not executed** (Docker wasn't running). The CI ubuntu leg runs them on the first push.
 - **Phase 2 done:** `internal/metadata`, `preset`, `planner`, migration 0002. T2.1–T2.6 pass under `-race`.
-- **Phase 3 done:** `internal/p2p`, migration 0003, engine push/pull. T3.1–T3.5 pass under `-race` on loopback (real Ed25519 mTLS 1.3, real mDNS). **T3.6 (real two-machine run) is held until D approves deployment.**
+- **Phase 3 done:** `internal/p2p`, migration 0003, engine push/pull. T3.1–T3.5 pass under `-race` on loopback (real Ed25519 mTLS 1.3, real mDNS). T3.6 passed on 2026-11-23 (see below).
 - **Phase 4 done:** `internal/daemon`, `ipc`, `policy`, `mcp`, the full `cmd/ferry` CLI and [`docs/IPC-PROTOCOL.md`](docs/IPC-PROTOCOL.md). T4.1–T4.3 pass under `-race`, and the built binary was smoke-tested end to end (daemon, doctor, send, verify, MCP over stdio, SIGTERM).
 - **Phase 5 done:**
   - packaging (systemd, launchd, example config) and GoReleaser
@@ -26,9 +26,19 @@ so. The Python/Electron code stays untouched until Phase 5. Tag
   - The send docs and code drafts that named internal hosts were not replayed; `main`'s public send doc is kept, with a superseded banner.
   - `SECURITY.md`'s threat model is rewritten for the engine's transport.
   - CI's park plugin job now runs `tests/park_plugin/test_standalone.py` without Park and reports the Park-dependent tests it skipped.
+- **T3.6 passed (2026-11-23):** macOS arm64 ↔ Linux x86_64 (Ubuntu), synthetic data only, isolated temp homes, cleaned up after.
+  - Pairing: the code is single-use and never on disk. TLS 1.2, no certificate and an unpinned key are each refused.
+  - Path Radar picked wired LAN over Wi-Fi by throughput, and fell back to Tailscale where a host firewall filtered the LAN.
+  - Push (Tailscale): 48 MB/s. Pull (gigabit LAN): 105 MB/s. Cancel then `ferry resume` sent only the remaining bytes (Range), 13/13 verified. `ferry verify` was clean, and exit 2 on a tampered byte.
+  - Added a repeatable `--listen` (commit `dc9ae10`, local): a wildcard listener binds dual-stack, including public IPv6.
+- **Follow-ups seen in T3.6 (not fixed):**
+  - The CLI ETA balloons while one large file streams, because verified bytes only move when a file publishes.
+  - On macOS, Wi-Fi and Tailscale IPv6 are classified as LAN; a Docker bridge is advertised as LAN.
+  - Remote verify prints the local readback mode.
+  - Resume offsets aren't recorded in the receipt.
+  - A pull whose source vanishes past failover deletes its kept temp, so later resumes start from zero.
 - **Not done, waiting on D:**
   - merge #248
-  - T3.6, a real two-machine run
   - update `main` branch protection to `go (ubuntu-latest)`, `go (macos-latest)`, `park plugin`
 
 ## Where things are
