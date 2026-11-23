@@ -20,26 +20,63 @@ type SourceSpec struct {
 	Label string `json:"label,omitempty"`
 }
 
-// DestinationSpec names one destination target.
+// DestinationSpec names one destination target: a saved destination
+// (DestinationID) or a folder path. ConfirmBinding is the explicit,
+// recorded confirmation a weak storage identity needs.
 type DestinationSpec struct {
 	Location
-	Label string `json:"label,omitempty"`
+	Label          string `json:"label,omitempty"`
+	ConfirmBinding bool   `json:"confirm_binding,omitempty"`
 }
 
-// PlanRequest is the single planning entry point (Phase 2 planner).
+// UserExclusion is a reviewer's decision to leave an entry behind.
+type UserExclusion struct {
+	SourceLabel string `json:"source_label"`
+	Rel         string `json:"rel"`
+	Reason      string `json:"reason"`
+}
+
+// PlanRequest is the single planning entry point. CameraRoles maps a
+// source label to a role override (e.g. "A-cam card" -> "ACAM").
 type PlanRequest struct {
-	Sources      []SourceSpec      `json:"sources"`
-	Destinations []DestinationSpec `json:"destinations"`
-	PresetID     string            `json:"preset_id,omitempty"`
-	PresetRev    int               `json:"preset_rev,omitempty"`
-	CameraRoles  map[string]string `json:"camera_roles,omitempty"`
-	Actor        string            `json:"actor"`
+	Sources        []SourceSpec      `json:"sources"`
+	Destinations   []DestinationSpec `json:"destinations"`
+	PresetID       string            `json:"preset_id,omitempty"`
+	PresetRev      int               `json:"preset_rev,omitempty"`
+	ConflictPolicy string            `json:"conflict_policy,omitempty"`
+	ChecksumAlgo   string            `json:"checksum_algo,omitempty"`
+	CameraRoles    map[string]string `json:"camera_roles,omitempty"`
+	Exclude        []UserExclusion   `json:"exclude,omitempty"`
+	Actor          string            `json:"actor"`
 }
 
-// Plan statuses.
+// SavedDestination is a named, recognizable destination folder.
+type SavedDestination struct {
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	PeerID             string `json:"peer_id"`
+	LocationKind       string `json:"location_kind"` // local_folder | volume_folder | mounted_share_folder
+	RootPath           string `json:"root_path"`
+	RelSubpath         string `json:"rel_subpath"`
+	IdentityKind       string `json:"identity_kind"`
+	IdentityValue      string `json:"identity_value"`
+	IdentityConfidence string `json:"identity_confidence"`
+	PinnedPresetID     string `json:"pinned_preset_id,omitempty"`
+	PinnedPresetRev    int    `json:"pinned_preset_rev,omitempty"`
+	DefaultConflict    string `json:"default_conflict"`
+	ChecksumAlgo       string `json:"checksum_algo"`
+	ReserveBytes       int64  `json:"reserve_bytes"`
+	Archived           bool   `json:"archived"`
+	CreatedAt          string `json:"created_at,omitempty"`
+	UpdatedAt          string `json:"updated_at,omitempty"`
+}
+
+// Plan statuses. An approval is single-use: starting a transfer moves the
+// plan to executed.
 const (
 	PlanDraft       = "draft"
 	PlanApproved    = "approved"
+	PlanExecuted    = "executed"
 	PlanInvalidated = "invalidated"
 )
 
@@ -63,6 +100,38 @@ type Plan struct {
 	ApprovedAt   string            `json:"approved_at,omitempty"`
 	Destinations []PlanDestination `json:"destinations"`
 	Entries      []PlanEntry       `json:"entries"`
+	Findings     []Finding         `json:"findings,omitempty"`
+	RequestJSON  string            `json:"-"`
+	DerivedFrom  string            `json:"derived_from,omitempty"`
+	SupersededBy string            `json:"superseded_by,omitempty"`
+	Invalidated  string            `json:"invalidated_reason,omitempty"`
+}
+
+// Finding severities.
+const (
+	SeverityBlocking = "blocking"
+	SeverityWarning  = "warning"
+)
+
+// Finding is something review must see. Blocking findings refuse approval.
+type Finding struct {
+	Severity   string `json:"severity"`
+	Kind       string `json:"kind"`
+	PlanDestID string `json:"plan_dest_id,omitempty"`
+	SourceRel  string `json:"source_rel,omitempty"`
+	DestRel    string `json:"dest_rel,omitempty"`
+	Message    string `json:"message"`
+}
+
+// Blocking reports whether any finding blocks approval.
+func (p *Plan) Blocking() []Finding {
+	var out []Finding
+	for _, f := range p.Findings {
+		if f.Severity == SeverityBlocking {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // PlanDestination is one target of a plan.
@@ -78,6 +147,10 @@ type PlanDestination struct {
 	FreeBytes       int64  `json:"free_bytes"`
 	RequiredBytes   int64  `json:"required_bytes"`
 	ReserveBytes    int64  `json:"reserve_bytes"`
+	PresetID        string `json:"preset_id,omitempty"`
+	PresetRev       int    `json:"preset_rev,omitempty"`
+	PresetHash      string `json:"preset_hash,omitempty"`
+	ConflictPolicy  string `json:"conflict_policy,omitempty"`
 }
 
 // PlanEntry is one source item routed to one destination.
@@ -97,6 +170,12 @@ type PlanEntry struct {
 	CameraRole      string `json:"camera_role,omitempty"`
 	Size            int64  `json:"size"`
 	MtimeNS         int64  `json:"mtime_ns"`
+	Kind            string `json:"kind"` // file | dir
+	ExpectedHash    string `json:"expected_hash,omitempty"`
+	RenamedFrom     string `json:"renamed_from,omitempty"`
+	Warning         string `json:"warning,omitempty"`
+	SourceLabel     string `json:"source_label,omitempty"`
+	MetadataJSON    string `json:"metadata,omitempty"`
 }
 
 // Transfer statuses.

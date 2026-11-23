@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 )
 
@@ -68,4 +69,19 @@ func run(ctx context.Context, name string, args ...string) ([]byte, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+func mountPoints(ctx context.Context) []string {
+	out, err := run(ctx, "/sbin/mount")
+	if err != nil {
+		return []string{"/"}
+	}
+	var mps []string
+	for mp, e := range ParseMacOSMountTable(string(out)) {
+		if mp == "/" || mp == "/System/Volumes/Data" || (strings.HasPrefix(mp, "/Volumes/") && e.FSType != "autofs" && e.FSType != "devfs") {
+			mps = append(mps, mp)
+		}
+	}
+	sort.Strings(mps)
+	return mps
 }

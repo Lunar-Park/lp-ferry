@@ -104,6 +104,10 @@ func (r *Runner) Create(ctx context.Context, planID, fingerprint, actor string) 
 	for _, e := range plan.Entries {
 		switch e.Action {
 		case model.ActionCopy, model.ActionDir, model.ActionExclude:
+		case model.ActionSkipIdentical:
+			if e.ExpectedHash == "" {
+				return "", fmt.Errorf("plan %s entry %d: skip_identical without checksum evidence", planID, e.ID)
+			}
 		default:
 			return "", fmt.Errorf("plan %s entry %d: action %q cannot execute (resolve it and re-approve)", planID, e.ID, e.Action)
 		}
@@ -155,6 +159,11 @@ func (r *Runner) Create(ctx context.Context, planID, fingerprint, actor string) 
 	}
 	var conflict *ledger.ReservationConflict
 	err = r.DB.WriteTx(ctx, func(tx *sql.Tx) error {
+		// The approval is single-use: consuming it here, in the same
+		// transaction, means a plan invalidated a moment ago cannot start.
+		if err := ledger.MarkPlanExecuted(tx, planID, fingerprint); err != nil {
+			return err
+		}
 		if err := ledger.InsertTransfer(tx, t, targets, items); err != nil {
 			return err
 		}
@@ -483,7 +492,47 @@ func (x *run) runUnit(u *unit) {
 		}
 	case model.ActionCopy:
 		x.copyUnit(u)
+	case model.ActionSkipIdentical:
+		for _, it := range u.items {
+			x.skipIdentical(it)
+		}
 	}
+}
+
+// skipIdentical re-proves, at execution time, that the existing file still
+// has exactly the content the plan checksummed. Anything else fails the
+// item; it is never overwritten.
+func (x *run) skipIdentical(it *model.TransferItem) {
+	s := x.byID[it.TargetID]
+	if err := s.haltErr(); err != nil {
+		x.settleFailure(it, nil, model.ItemFailed, err)
+		return
+	}
+	dir, leaf, err := storage.OpenFileIn(s.root, it.Entry.DestRelPath, false)
+	if err != nil {
+		x.settleFailure(it, nil, model.ItemFailed, err)
+		return
+	}
+	defer func() { _ = dir.Close() }()
+	rb, mode, err := dir.OpenReadback(leaf)
+	if err != nil {
+		x.settleFailure(it, nil, model.ItemFailed, fmt.Errorf("existing file for skip_identical: %w", err))
+		return
+	}
+	sum, n, err := hashReader(x.ctx, rb, x.t.ChecksumAlgo, nil)
+	_ = rb.Close()
+	if err != nil {
+		x.settleFailure(it, nil, model.ItemFailed, err)
+		return
+	}
+	if sum != it.Entry.ExpectedHash {
+		x.settleFailure(it, nil, model.ItemFailed, fmt.Errorf("%w: the existing file changed since planning; replan", storage.ErrChecksumMismatch))
+		return
+	}
+	it.Status, it.SourceHash, it.DestHash, it.ReadbackMode, it.Error = model.ItemSkippedIdentical, sum, sum, mode, ""
+	it.BytesCopied = 0
+	_ = x.commitItem(it, s, 0, false)
+	_ = n
 }
 
 func (x *run) makeDir(it *model.TransferItem) {

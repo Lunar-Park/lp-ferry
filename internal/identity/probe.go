@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -89,13 +90,20 @@ func PathOnly(mountPath string) *VolumeIdentity {
 	}
 }
 
-// MountPointOf returns the mount point containing path: the highest
-// ancestor still on path's device.
+// MountPointOf returns the mount point of the filesystem holding path,
+// as the kernel reports it (on macOS this sees through firmlinks: a path
+// under /private/var lives on /System/Volumes/Data, not the sealed "/").
 func MountPointOf(path string) (string, error) {
 	p, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return "", err
 	}
+	return mountPointOf(p)
+}
+
+// devWalkMountPoint is the portable fallback: the highest ancestor still
+// on path's device.
+func devWalkMountPoint(p string) (string, error) {
 	var st unix.Stat_t
 	if err := unix.Stat(p, &st); err != nil {
 		return "", &os.PathError{Op: "stat", Path: p, Err: err}
@@ -114,9 +122,57 @@ func MountPointOf(path string) (string, error) {
 	}
 }
 
+// RelWithin expresses real (an absolute, resolved path) relative to the
+// mount point mp. A firmlinked path (macOS /private/var on the Data
+// volume) is not lexically under its mount point, so it is tried as
+// mp + real as well.
+func RelWithin(mp, real string) (string, bool) {
+	if rel, err := filepath.Rel(mp, real); err == nil && rel != ".." && !strings.HasPrefix(rel, "../") {
+		if rel == "." {
+			rel = ""
+		}
+		return filepath.ToSlash(rel), true
+	}
+	if _, err := os.Stat(filepath.Join(mp, real)); err == nil {
+		return strings.TrimPrefix(filepath.ToSlash(real), "/"), true
+	}
+	return "", false
+}
+
 // System returns the prober for the running platform.
 func System() Prober { return systemProber() }
 
 func withBudget(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, ProbeBudget)
+}
+
+// Observe identifies every mounted volume a destination could live on.
+func Observe(ctx context.Context, p Prober) ([]Observation, ProbeResult) {
+	mounts := mountPoints(ctx)
+	res := p.Identify(ctx, mounts)
+	var out []Observation
+	for _, mp := range mounts {
+		info, ok := res.Mounts[mp]
+		if !ok {
+			continue
+		}
+		// Writability of the mount is the read-only flag, not whether this
+		// user may write the mount's root directory.
+		out = append(out, Observation{MountPath: mp, Identity: info.Identity, Writable: !readOnly(mp)})
+	}
+	return out, res
+}
+
+// Snapshot probes the volume holding path and returns its mount info.
+func Snapshot(ctx context.Context, p Prober, path string) (MountInfo, string, error) {
+	mp, err := MountPointOf(path)
+	if err != nil {
+		return MountInfo{}, "", err
+	}
+	res := p.Identify(ctx, []string{mp})
+	info, ok := res.Mounts[mp]
+	if !ok {
+		return MountInfo{MountPath: mp, Identity: PathOnly(mp), Class: ClassUnknown}, mp, nil
+	}
+	return info, mp, nil
 }

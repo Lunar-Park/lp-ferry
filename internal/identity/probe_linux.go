@@ -104,3 +104,28 @@ func (p *LinuxProber) classOf(source string) StorageClass {
 	}
 	return ClassUnknown
 }
+
+func mountPoints(ctx context.Context) []string {
+	text, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return []string{"/"}
+	}
+	seen := map[string]bool{}
+	var mps []string
+	for _, e := range ParseLinuxMountinfo(string(text)) {
+		if pseudoFS[e.FSType] || seen[e.MountPoint] || strings.HasPrefix(e.MountPoint, "/proc") || strings.HasPrefix(e.MountPoint, "/sys") {
+			continue
+		}
+		seen[e.MountPoint] = true
+		mps = append(mps, e.MountPoint)
+	}
+	return mps
+}
+
+// pseudoFS are Linux filesystem types that are never destinations.
+var pseudoFS = map[string]bool{
+	"proc": true, "sysfs": true, "cgroup": true, "cgroup2": true, "devpts": true, "devtmpfs": true, "mqueue": true,
+	"debugfs": true, "tracefs": true, "securityfs": true, "pstore": true, "bpf": true, "configfs": true,
+	"fusectl": true, "hugetlbfs": true, "autofs": true, "binfmt_misc": true, "nsfs": true, "rpc_pipefs": true,
+	"devfs": true, "squashfs": true,
+}
