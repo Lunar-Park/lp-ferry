@@ -15,7 +15,8 @@ so. The Python/Electron code stays untouched until Phase 5. Tag
 - **Linux:** vetted, linted and test-compiled, but **not executed** (Docker wasn't running). The CI ubuntu leg runs them on the first push.
 - **Phase 2 done:** `internal/metadata`, `preset`, `planner`, migration 0002. T2.1–T2.6 pass under `-race`.
 - **Phase 3 done:** `internal/p2p`, migration 0003, engine push/pull. T3.1–T3.5 pass under `-race` on loopback (real Ed25519 mTLS 1.3, real mDNS). **T3.6 (real two-machine run) is held until D approves deployment.**
-- **Next:** Phase 4 (daemon/IPC/CLI/MCP). Stop before Phase 5.
+- **Phase 4 done:** `internal/daemon`, `ipc`, `policy`, `mcp`, the full `cmd/ferry` CLI and [`docs/IPC-PROTOCOL.md`](docs/IPC-PROTOCOL.md). T4.1–T4.3 pass under `-race`, and the built binary was smoke-tested end to end (daemon, doctor, send, verify, MCP over stdio, SIGTERM).
+- **Stopped before Phase 5**, on purpose: no Python/Electron files deleted, nothing pushed. D reviews first. Phase 5 needs: packaging (systemd/launchd/goreleaser), the Park thin adapter, legacy retirement and the README rewrite.
 
 ## Where things are
 
@@ -28,6 +29,7 @@ so. The Python/Electron code stays untouched until Phase 5. Tag
 - `internal/preset`: glob dialect, templates, routing engine, built-ins, immutable revisions.
 - `internal/planner`: scanner, conflict matrix, approve/revise, `plan.tree`. Tests: `planner_test.go` (T2.x).
 - `internal/p2p`: identity, pairing, grants, Path Radar, HTTP/2 handlers, pull/push, mDNS, plus the adapter implementing the planner and engine `Remote` interfaces. Tests: `p2p_test.go` (T3.x).
+- `internal/daemon`: service wiring, every RPC method, event bus, drive watcher. `internal/ipc`: socket JSON-RPC. `internal/mcp`: 12-tool stdio server. `internal/policy`: agent rules. Tests: `daemon_test.go` (T4.x), `cmd/ferry/cli_test.go`.
 - Gate: `make vet lint race cross`.
 
 ## Decisions
@@ -48,8 +50,13 @@ so. The Python/Electron code stays untouched until Phase 5. Tag
 - Grants are signed by the source and bound to transfer, grantee, item list and expiry. Items are rechecked against allowed roots with lstat containment on every request, and the client refuses all redirects.
 - Push is used when the source is local (the card is read once for every target). Pull/land is used when the source is a peer, so a coordinator carries no file bytes. A pull resumes from the job-owned temp's size, and the source hashes the prefix locally so the trailer is always a whole-file SHA-256.
 - Path Radar retries a downed path only when nothing else answers, so a brief drop on the only link resumes instead of failing.
+- IPC is newline-delimited JSON-RPC 2.0 on a 0600 socket in a 0700 directory, with a same-uid peer-credential check. Params reject unknown fields. Event delivery is best-effort per subscriber and never stalls a transfer.
+- Agents act as `agent:<name>`. Over-policy requests (unsaved destination, over `auto_approve_max_bytes`, or saved-destination auto-approve off) park the plan in `awaiting_approval`. A human `plan.approve` starts it under the agent's name, and agents cannot approve. Actor strings are attribution plus a policy hook, not authentication against same-user code.
+- MCP is a lean in-repo stdio implementation (no SDK dependency), with 12 tools all marked `destructiveHint: false`. Nothing anywhere deletes, moves or overwrites.
+- The final `transfer.state` is emitted after the receipt export, so a client reacting to it can open the receipt.
+- Drive hot-plug is a 3 s mount-list poll that emits `drive.mounted` / `drive.unmounted`. There are no FSEvents/udev hooks yet.
 - Phase-1 limits, made explicit rather than faked:
   - Remote targets: `skip_identical` isn't offered (keep_both instead). Remote crash-window reconcile re-checks on the peer via `/v1/verify`.
   - `needs_review` entries are refused at approval and at transfer start. `skip_identical` re-proves the checksum at run time.
-  - No hot-plug watcher or link speed yet.
+  - Link speed: Linux reads sysfs speed; macOS tiers by interface name only.
   - The `verifying` transfer state isn't emitted.

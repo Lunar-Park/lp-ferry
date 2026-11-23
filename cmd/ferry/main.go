@@ -48,6 +48,7 @@ func newRootCmd() *cobra.Command {
 		},
 	})
 	addVerifyCmd(root, g)
+	addCommands(root, g)
 	return root
 }
 
@@ -82,7 +83,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return ee.code
 		}
 		fmt.Fprintln(stderr, "ferry:", err)
-		return 4
+		return 1
 	}
 	return 0
 }

@@ -146,6 +146,10 @@ func withBudget(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, ProbeBudget)
 }
 
+// MountPoints lists mounted volumes a destination could live on (cheap: no
+// identity probe).
+func MountPoints(ctx context.Context) []string { return mountPoints(ctx) }
+
 // Observe identifies every mounted volume a destination could live on.
 func Observe(ctx context.Context, p Prober) ([]Observation, ProbeResult) {
 	mounts := mountPoints(ctx)

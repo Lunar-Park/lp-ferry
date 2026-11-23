@@ -69,12 +69,12 @@ type Runner struct {
 
 // Result summarizes a finished run.
 type Result struct {
-	TransferID  string
-	Status      string
-	ReceiptID   string
-	ReceiptPath string
-	ExportError string
-	Findings    []string
+	TransferID  string   `json:"transfer_id"`
+	Status      string   `json:"status"`
+	ReceiptID   string   `json:"receipt_id,omitempty"`
+	ReceiptPath string   `json:"receipt_path,omitempty"`
+	ExportError string   `json:"export_error,omitempty"`
+	Findings    []string `json:"findings,omitempty"`
 }
 
 func newID(prefix string) string {
@@ -1143,12 +1143,14 @@ func (x *run) finish() (*Result, error) {
 	}); err != nil {
 		return nil, fmt.Errorf("recording transfer outcome: %w", err)
 	}
-	x.r.state(x.t.ID, status)
 	result := &Result{TransferID: x.t.ID, Status: status, ReceiptID: rc.ReceiptID, Findings: x.findings}
 	if x.crash(PointBeforeExport, &model.TransferItem{}) {
 		return nil, ErrSimulatedCrash
 	}
 	result.ReceiptPath, result.ExportError = x.r.export(context.WithoutCancel(x.ctx), rc)
+	// Announce the final state only once the receipt file exists, so a
+	// client reacting to it can open the receipt.
+	x.r.state(x.t.ID, status)
 	return result, nil
 }
 

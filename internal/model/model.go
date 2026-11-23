@@ -75,6 +75,7 @@ type SavedDestination struct {
 // plan to executed.
 const (
 	PlanDraft       = "draft"
+	PlanAwaiting    = "awaiting_approval" // an agent asked; a human must approve
 	PlanApproved    = "approved"
 	PlanExecuted    = "executed"
 	PlanInvalidated = "invalidated"

@@ -654,7 +654,7 @@ func (p *Planner) Approve(ctx context.Context, planID, fp string) error {
 	if err != nil {
 		return err
 	}
-	if plan.Status != model.PlanDraft || plan.Fingerprint != fp {
+	if (plan.Status != model.PlanDraft && plan.Status != model.PlanAwaiting) || plan.Fingerprint != fp {
 		return fmt.Errorf("%w: plan %s is %s (fingerprint %s)", ledger.ErrStaleApproval, planID, plan.Status, plan.Fingerprint)
 	}
 	if b := plan.Blocking(); len(b) > 0 {
@@ -738,7 +738,7 @@ func (p *Planner) Revise(ctx context.Context, planID string, rv Revision) (*mode
 	if err != nil {
 		return nil, err
 	}
-	if old.Status != model.PlanDraft && old.Status != model.PlanApproved {
+	if old.Status != model.PlanDraft && old.Status != model.PlanApproved && old.Status != model.PlanAwaiting {
 		return nil, fmt.Errorf("plan %s is %s and cannot be revised", planID, old.Status)
 	}
 	var req model.PlanRequest

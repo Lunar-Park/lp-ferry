@@ -32,16 +32,16 @@ const (
 
 // Routing is the engine's decision for one entry.
 type Routing struct {
-	Rel             string
-	IsDir           bool
-	Action          string
-	DestRel         string
-	Rule            string // rule id, "fallback", "empty_dirs", "group:<id>", "exclusion:<id>"
-	GroupID         string // stable per source: "<group id>@<root rel>"
-	GroupRoot       string // source rel of the group root
-	GroupDest       string // rendered destination of the group root
-	ExclusionReason string
-	Warning         string
+	Rel             string `json:"rel"`
+	IsDir           bool   `json:"is_dir"`
+	Action          string `json:"action"`
+	DestRel         string `json:"dest_rel"`
+	Rule            string `json:"rule"`                 // rule id, "fallback", "empty_dirs", "group:<id>", "exclusion:<id>"
+	GroupID         string `json:"group_id,omitempty"`   // stable per source: "<group id>@<root rel>"
+	GroupRoot       string `json:"group_root,omitempty"` // source rel of the group root
+	GroupDest       string `json:"group_dest,omitempty"` // rendered destination of the group root
+	ExclusionReason string `json:"exclusion_reason,omitempty"`
+	Warning         string `json:"warning,omitempty"`
 }
 
 func anyFold(vals []string, v string) bool {

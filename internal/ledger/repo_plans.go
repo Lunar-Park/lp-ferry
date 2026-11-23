@@ -121,7 +121,7 @@ func RecordCameraKeys(tx *sql.Tx, planID string, keys []string) error {
 }
 
 // pendingPlans is the set of statuses an edit can still invalidate.
-const pendingPlans = `('draft','approved')`
+const pendingPlans = `('draft','awaiting_approval','approved')`
 
 // InvalidatePlan marks one pending plan invalidated with a reason.
 func InvalidatePlan(tx *sql.Tx, planID, reason, supersededBy string) error {
@@ -197,8 +197,8 @@ func ListPlanEntries(ctx context.Context, q querier, planID, destID string, afte
 
 // ApprovePlan approves a draft plan under exactly the fingerprint given.
 func ApprovePlan(tx *sql.Tx, planID, fingerprint string) error {
-	res, err := tx.Exec(`UPDATE plans SET status = ?, approved_at = ? WHERE id = ? AND fingerprint = ? AND status IN (?, ?)`,
-		model.PlanApproved, Now(), planID, fingerprint, model.PlanDraft, model.PlanApproved)
+	res, err := tx.Exec(`UPDATE plans SET status = ?, approved_at = ? WHERE id = ? AND fingerprint = ? AND status IN (?, ?, ?)`,
+		model.PlanApproved, Now(), planID, fingerprint, model.PlanDraft, model.PlanAwaiting, model.PlanApproved)
 	if err != nil {
 		return err
 	}
@@ -285,4 +285,17 @@ func scanEntry(s scanner) (model.PlanEntry, error) {
 func closeRows(rows *sql.Rows) error {
 	err := rows.Err()
 	return errors.Join(err, rows.Close())
+}
+
+// MarkPlanAwaiting records that an agent requested this plan and policy
+// requires a human to approve it.
+func MarkPlanAwaiting(tx *sql.Tx, planID, fingerprint string) error {
+	res, err := tx.Exec(`UPDATE plans SET status='awaiting_approval' WHERE id=? AND fingerprint=? AND status='draft'`, planID, fingerprint)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: %s", ErrStaleApproval, planID)
+	}
+	return nil
 }

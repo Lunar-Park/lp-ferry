@@ -257,16 +257,16 @@ func ReleaseDeadReservations(tx *sql.Tx, alive ...string) (int64, error) {
 
 // Receipt row.
 type Receipt struct {
-	ID           string
-	TransferID   string
-	PlanID       string
-	Status       string
-	Actor        string
-	Digest       string
-	BodyJSON     string
-	ExportedPath string
-	ExportError  string
-	CreatedAt    string
+	ID           string `json:"receipt_id"`
+	TransferID   string `json:"transfer_id"`
+	PlanID       string `json:"plan_id"`
+	Status       string `json:"status"`
+	Actor        string `json:"actor"`
+	Digest       string `json:"digest"`
+	BodyJSON     string `json:"-"`
+	ExportedPath string `json:"exported_path,omitempty"`
+	ExportError  string `json:"export_error,omitempty"`
+	CreatedAt    string `json:"created_at"`
 }
 
 // InsertReceipt writes a receipt row.
@@ -313,4 +313,73 @@ func InsertVerification(tx *sql.Tx, v *Verification) error {
 		v.ReceiptID, v.TransferID, v.PeerID, v.Folder, v.Checked, v.Missing, v.Modified, v.Added, v.Unreadable, v.Clean,
 		v.ReadbackMode, v.DetailJSON, Now())
 	return err
+}
+
+// TransferSummary is one row of transfer.list.
+type TransferSummary struct {
+	ID        string `json:"id"`
+	PlanID    string `json:"plan_id"`
+	Status    string `json:"status"`
+	Actor     string `json:"actor"`
+	StartedAt string `json:"started_at,omitempty"`
+	EndedAt   string `json:"ended_at,omitempty"`
+	Summary   string `json:"error_summary,omitempty"`
+}
+
+// ListTransfers returns the newest transfers first.
+func ListTransfers(ctx context.Context, q querier, limit int) ([]TransferSummary, error) {
+	rows, err := q.QueryContext(ctx, `SELECT id, plan_id, status, actor, COALESCE(started_at,''), COALESCE(ended_at,''),
+		COALESCE(error_summary,'') FROM transfers ORDER BY started_at DESC, rowid DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	var out []TransferSummary
+	for rows.Next() {
+		var t TransferSummary
+		if err := rows.Scan(&t.ID, &t.PlanID, &t.Status, &t.Actor, &t.StartedAt, &t.EndedAt, &t.Summary); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, closeRows(rows)
+}
+
+// GetReceipt loads one receipt by ID.
+func GetReceipt(ctx context.Context, q querier, id string) (*Receipt, error) {
+	r := &Receipt{ID: id}
+	var exported, exportErr sql.NullString
+	err := q.QueryRowContext(ctx, `SELECT transfer_id, plan_id, status, actor, digest, body_json, exported_path, export_error, created_at
+		FROM receipts WHERE id = ?`, id).Scan(&r.TransferID, &r.PlanID, &r.Status, &r.Actor, &r.Digest, &r.BodyJSON, &exported, &exportErr, &r.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("receipt %s: %w", id, ErrNotFound)
+	}
+	if err != nil {
+		return nil, err
+	}
+	r.ExportedPath, r.ExportError = exported.String, exportErr.String
+	return r, nil
+}
+
+// ListReceipts returns receipt headers, newest first (optionally for one transfer).
+func ListReceipts(ctx context.Context, q querier, transferID string, limit int) ([]Receipt, error) {
+	where, args := ``, []any{}
+	if transferID != "" {
+		where, args = ` WHERE transfer_id = ?`, append(args, transferID)
+	}
+	rows, err := q.QueryContext(ctx, `SELECT id, transfer_id, plan_id, status, actor, digest, COALESCE(exported_path,''),
+		COALESCE(export_error,''), created_at FROM receipts`+where+` ORDER BY created_at DESC, rowid DESC LIMIT ?`, append(args, limit)...)
+	if err != nil {
+		return nil, err
+	}
+	var out []Receipt
+	for rows.Next() {
+		var r Receipt
+		if err := rows.Scan(&r.ID, &r.TransferID, &r.PlanID, &r.Status, &r.Actor, &r.Digest, &r.ExportedPath, &r.ExportError, &r.CreatedAt); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, closeRows(rows)
 }
