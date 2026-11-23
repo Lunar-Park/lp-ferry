@@ -698,7 +698,7 @@ func (x *run) copyUnit(u *unit) {
 			if err := x.write(func(tx *sql.Tx) error { return ledger.UpdateItem(tx, it) }); err != nil {
 				return
 			}
-			push, err := x.r.Remote.Push(x.ctx, s.g.PeerID, x.t.ID, it.ID, s.g.RootPath, it.Entry.DestRelPath, it.Entry.Size, it.Entry.MtimeNS)
+			push, err := x.r.Remote.Push(x.ctx, s.g.PeerID, x.t.ID, it.ID, s.g.RootPath, it.Entry.DestRelPath, it.Entry.Size, it.Entry.MtimeNS, algo)
 			if err != nil {
 				x.settleFailure(it, nil, model.ItemFailed, fmt.Errorf("peer %s: %w", s.g.PeerID, err))
 				continue

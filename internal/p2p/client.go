@@ -295,7 +295,11 @@ func (c *Client) Info(ctx context.Context) (*ProbeInfo, error) {
 // full-file SHA-256 arrives as the X-Ferry-SHA256 trailer once the body
 // has been read to EOF.
 func (c *Client) Fetch(ctx context.Context, transferID, itemID, grant string, offset int64) (*http.Response, error) {
-	hdr := http.Header{"X-Ferry-Grant": {grant}}
+	return c.fetch(ctx, transferID, itemID, grant, offset, "sha256")
+}
+
+func (c *Client) fetch(ctx context.Context, transferID, itemID, grant string, offset int64, algo string) (*http.Response, error) {
+	hdr := http.Header{"X-Ferry-Grant": {grant}, "X-Ferry-Checksum": {algo}}
 	if offset > 0 {
 		hdr.Set("Range", "bytes="+strconv.FormatInt(offset, 10)+"-")
 	}

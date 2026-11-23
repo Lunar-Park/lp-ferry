@@ -1,6 +1,7 @@
 package p2p
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Lunar-Park/lp-ferry/internal/checksum"
 	"github.com/Lunar-Park/lp-ferry/internal/config"
 	"github.com/Lunar-Park/lp-ferry/internal/engine"
 	"github.com/Lunar-Park/lp-ferry/internal/ledger"
@@ -469,6 +471,12 @@ func TestT3_5_PathRadarFailover(t *testing.T) {
 // Pull modes through the engine: a remote source landing locally, and a
 // coordinator telling one peer to pull from another so it carries no bytes.
 func TestEnginePullAndRemoteLand(t *testing.T) {
+	for _, algo := range []string{checksum.SHA256, checksum.BLAKE3} {
+		t.Run(algo, func(t *testing.T) { testEnginePullAndRemoteLand(t, algo) })
+	}
+}
+
+func testEnginePullAndRemoteLand(t *testing.T, algo string) {
 	base := t.TempDir()
 	card := dirIn(t, base, "CARD")
 	local := dirIn(t, base, "LOCAL")
@@ -484,7 +492,8 @@ func TestEnginePullAndRemoteLand(t *testing.T) {
 	remote := Remote{N: coord.Node}
 	pl := &planner.Planner{DB: coord.DB, Presets: &preset.Service{DB: coord.DB}, Remote: remote}
 	plan, err := pl.Plan(ctx, model.PlanRequest{
-		Sources: []model.SourceSpec{{Location: model.Location{PeerID: source.Identity.ID, Path: card}, Label: "card"}},
+		ChecksumAlgo: algo,
+		Sources:      []model.SourceSpec{{Location: model.Location{PeerID: source.Identity.ID, Path: card}, Label: "card"}},
 		Destinations: []model.DestinationSpec{
 			{Location: model.Location{Path: local}},
 			{Location: model.Location{PeerID: dest.Identity.ID, Path: nas}},
@@ -508,6 +517,22 @@ func TestEnginePullAndRemoteLand(t *testing.T) {
 			t.Logf("%s %s %s", it.FinalPath, it.Status, it.Error)
 		}
 		t.Fatalf("%+v %v", res, err)
+	}
+	items, err := ledger.GetItems(ctx, coord.DB.Read(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, _, err := checksum.Reader(algo, bytes.NewReader(mustRead(t, filepath.Join(card, "A.MOV"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected two copied items, got %d", len(items))
+	}
+	for _, item := range items {
+		if item.SourceHash != digest || item.DestHash != digest {
+			t.Fatalf("wrong %s digest on %s", algo, item.FinalPath)
+		}
 	}
 	for _, root := range []string{local, nas} {
 		if got := fileSHA(t, filepath.Join(root, "Sources", "card", "A.MOV")); got != sum {

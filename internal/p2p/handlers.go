@@ -1,8 +1,8 @@
 package p2p
 
 import (
+	"cmp"
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Lunar-Park/lp-ferry/internal/checksum"
 	"github.com/Lunar-Park/lp-ferry/internal/config"
 	"github.com/Lunar-Park/lp-ferry/internal/identity"
 	"github.com/Lunar-Park/lp-ferry/internal/planner"
@@ -375,7 +376,12 @@ func (n *Node) handleItem(w http.ResponseWriter, r *http.Request) {
 		offset = off
 	}
 	storage.AdviseSource(f)
-	h := sha256.New()
+	algo := cmp.Or(r.Header.Get("X-Ferry-Checksum"), checksum.SHA256)
+	h, err := checksum.New(algo)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	// The prefix the receiver already holds is hashed here, locally, so the
 	// trailer is always the hash of the whole file.
 	if offset > 0 {
@@ -384,7 +390,7 @@ func (n *Node) handleItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	w.Header().Set("Trailer", "X-Ferry-SHA256, X-Ferry-Error")
+	w.Header().Set("Trailer", hashTrailer(algo)+", X-Ferry-Error")
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.FormatInt(before.Size-offset, 10))
 	if offset > 0 {
@@ -402,7 +408,7 @@ func (n *Node) handleItem(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Ferry-Error", "source changed during send")
 		return
 	}
-	w.Header().Set("X-Ferry-SHA256", hex.EncodeToString(h.Sum(nil)))
+	w.Header().Set(hashTrailer(algo), hex.EncodeToString(h.Sum(nil)))
 }
 
 // PushResult is a destination's verdict on a pushed item.
@@ -436,14 +442,19 @@ func (n *Node) handleStream(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, err)
 		return
 	}
-	res := n.receive(r.Context(), r.Body, func() string { return r.Trailer.Get("X-Ferry-SHA256") }, real, q.Get("rel"), tid, item, size, mtime, 0)
+	algo := cmp.Or(r.Header.Get("X-Ferry-Checksum"), checksum.SHA256)
+	if !checksum.Valid(algo) {
+		http.Error(w, "unsupported checksum", http.StatusBadRequest)
+		return
+	}
+	res := n.receive(r.Context(), r.Body, func() string { return r.Trailer.Get(hashTrailer(algo)) }, real, q.Get("rel"), tid, item, size, mtime, 0, algo)
 	writeJSON(w, res)
 }
 
 // receive writes body into a job-owned temp under root/rel and publishes
 // it if the readback matches wantHash(). resumeFrom > 0 appends to an
 // existing job-owned temp instead of creating it.
-func (n *Node) receive(ctx context.Context, body io.Reader, wantHash func() string, rootPath, rel, tid, item string, size, mtime, resumeFrom int64) PushResult {
+func (n *Node) receive(ctx context.Context, body io.Reader, wantHash func() string, rootPath, rel, tid, item string, size, mtime, resumeFrom int64, algo string) PushResult {
 	fail := func(err error) PushResult { return PushResult{Status: "failed", Error: err.Error()} }
 	root, err := storage.OpenRoot(rootPath)
 	if err != nil {
@@ -480,17 +491,20 @@ func (n *Node) receive(ctx context.Context, body io.Reader, wantHash func() stri
 		return fail(err)
 	}
 	_ = f.Close()
-	return n.finishPart(ctx, dir, part, leaf, wantHash(), mtime)
+	return n.finishPart(ctx, dir, part, leaf, wantHash(), mtime, algo)
 }
 
 // verifyPart hashes a temp by physical readback.
-func verifyPart(ctx context.Context, dir *storage.Dir, part string) (string, string, error) {
+func verifyPart(ctx context.Context, dir *storage.Dir, part, algo string) (string, string, error) {
 	rb, mode, err := dir.OpenReadback(part)
 	if err != nil {
 		return "", "", err
 	}
 	defer func() { _ = rb.Close() }()
-	h := sha256.New()
+	h, err := checksum.New(algo)
+	if err != nil {
+		return "", "", err
+	}
 	if _, err := io.CopyBuffer(h, ctxReader{ctx, rb}, make([]byte, 2<<20)); err != nil {
 		return "", "", err
 	}
@@ -529,7 +543,7 @@ func publishPart(dir *storage.Dir, part, leaf string, mtime int64) PushResult {
 }
 
 // finishPart: physical readback, compare with the sender's hash, publish.
-func (n *Node) finishPart(ctx context.Context, dir *storage.Dir, part, leaf, want string, mtime int64) PushResult {
+func (n *Node) finishPart(ctx context.Context, dir *storage.Dir, part, leaf, want string, mtime int64, algo string) PushResult {
 	fail := func(err error) PushResult {
 		_ = dir.Remove(part)
 		return PushResult{Status: "failed", Error: err.Error()}
@@ -537,7 +551,7 @@ func (n *Node) finishPart(ctx context.Context, dir *storage.Dir, part, leaf, wan
 	if want == "" {
 		return fail(errors.New("sender sent no checksum; not published"))
 	}
-	got, mode, err := verifyPart(ctx, dir, part)
+	got, mode, err := verifyPart(ctx, dir, part, algo)
 	if err != nil {
 		return fail(err)
 	}

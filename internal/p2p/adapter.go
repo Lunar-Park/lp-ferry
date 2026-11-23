@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/Lunar-Park/lp-ferry/internal/checksum"
 	"github.com/Lunar-Park/lp-ferry/internal/engine"
 	"github.com/Lunar-Park/lp-ferry/internal/planner"
 	"github.com/Lunar-Park/lp-ferry/internal/receipt"
@@ -70,7 +71,7 @@ func (p push) Finish(sum string) (engine.RemoteVerdict, error) {
 }
 
 // Push streams one item to a destination peer.
-func (r Remote) Push(ctx context.Context, peer, tid string, itemID int64, root, destRel string, size, mtimeNS int64) (engine.RemotePush, error) {
+func (r Remote) Push(ctx context.Context, peer, tid string, itemID int64, root, destRel string, size, mtimeNS int64, algo string) (engine.RemotePush, error) {
 	c, err := r.client(ctx, peer)
 	if err != nil {
 		return nil, err
@@ -80,7 +81,7 @@ func (r Remote) Push(ctx context.Context, peer, tid string, itemID int64, root, 
 			return nil, err
 		}
 	}
-	p, err := c.Push(ctx, tid, strconv.FormatInt(itemID, 10), root, destRel, size, mtimeNS)
+	p, err := c.push(ctx, tid, strconv.FormatInt(itemID, 10), root, destRel, size, mtimeNS, algo)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +107,12 @@ func (r Remote) requestGrant(ctx context.Context, src *Client, tid, grantee stri
 func landItems(items []engine.PullItem) []LandItem {
 	out := make([]LandItem, 0, len(items))
 	for _, it := range items {
-		out = append(out, LandItem{ItemID: strconv.FormatInt(it.ItemID, 10), DestRel: it.DestRel, Size: it.Size, MtimeNS: it.MtimeNS})
+		algo := it.ChecksumAlgo
+		// Legacy landing peers strictly decode JSON and implicitly use SHA-256.
+		if algo == checksum.SHA256 {
+			algo = ""
+		}
+		out = append(out, LandItem{ChecksumAlgo: algo, ItemID: strconv.FormatInt(it.ItemID, 10), DestRel: it.DestRel, Size: it.Size, MtimeNS: it.MtimeNS})
 	}
 	return out
 }

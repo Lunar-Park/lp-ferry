@@ -102,6 +102,8 @@ Mutating calls take an optional `actor`: `"human"` (default) or `"agent:<name>"`
 
 `TreeNode` = `{name, path, kind: dir|file, file_count, total_bytes, conflict_count, renamed_count, excluded_count?, matched_rule?, sample_transforms?: [{before, after, action}], before?, action?, conflict_kind?, renamed_from?, child_count, children?: [TreeNode], next_cursor?}`. Children are directories first, then files, by name. To page, call again with `parent_path` = that node's `path` and its `next_cursor`.
 
+Local and peer transfers use the checksum in the reviewed plan for both the source digest and the physical readback. SHA-256 is the compatible choice for peers running an earlier v2 daemon. BLAKE3 peer transfers require support at both ends.
+
 ### Transfers
 
 | method | params | result |

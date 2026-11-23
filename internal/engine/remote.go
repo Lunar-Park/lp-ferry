@@ -36,12 +36,13 @@ type RemotePush interface {
 
 // PullItem is one item a destination pulls from a source peer.
 type PullItem struct {
-	ItemID     int64
-	SourceRoot string
-	SourceRel  string
-	DestRel    string
-	Size       int64
-	MtimeNS    int64
+	ChecksumAlgo string
+	ItemID       int64
+	SourceRoot   string
+	SourceRel    string
+	DestRel      string
+	Size         int64
+	MtimeNS      int64
 }
 
 // PullHooks observe a pull. BeforePublish lets the engine record the
@@ -55,7 +56,7 @@ type PullHooks struct {
 // implements it; the engine never speaks the wire protocol itself.
 type Remote interface {
 	// Push streams one item from a local source to a destination peer.
-	Push(ctx context.Context, peer, transferID string, itemID int64, root, destRel string, size, mtimeNS int64) (RemotePush, error)
+	Push(ctx context.Context, peer, transferID string, itemID int64, root, destRel string, size, mtimeNS int64, algo string) (RemotePush, error)
 	// Pull fetches items from a source peer into a local root.
 	Pull(ctx context.Context, sourcePeer, transferID, root string, items []PullItem, h PullHooks) ([]RemoteVerdict, error)
 	// Land asks destPeer to pull items from sourcePeer directly.
@@ -137,7 +138,7 @@ func (x *run) pullUnit(u *unit) {
 			return
 		}
 		x.tele.Phase(s.g.ID, it.Entry.DestRelPath, PhaseStreaming)
-		items := []PullItem{{ItemID: it.ID, SourceRoot: it.Entry.SourceRoot, SourceRel: it.Entry.SourceRel,
+		items := []PullItem{{ChecksumAlgo: x.t.ChecksumAlgo, ItemID: it.ID, SourceRoot: it.Entry.SourceRoot, SourceRel: it.Entry.SourceRel,
 			DestRel: it.Entry.DestRelPath, Size: it.Entry.Size, MtimeNS: it.Entry.MtimeNS}}
 		hooks := PullHooks{
 			Progress: func(_ int64, n int64) { x.tele.Wrote(s.g.ID, n) },

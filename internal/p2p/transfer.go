@@ -3,6 +3,7 @@ package p2p
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,15 +13,17 @@ import (
 	"net/url"
 	"strconv"
 
+	"github.com/Lunar-Park/lp-ferry/internal/checksum"
 	"github.com/Lunar-Park/lp-ferry/internal/storage"
 )
 
 // LandItem is one file to pull.
 type LandItem struct {
-	ItemID  string `json:"item_id"`
-	DestRel string `json:"dest_rel"`
-	Size    int64  `json:"size"`
-	MtimeNS int64  `json:"mtime_ns"`
+	ChecksumAlgo string `json:"checksum_algo,omitempty"`
+	ItemID       string `json:"item_id"`
+	DestRel      string `json:"dest_rel"`
+	Size         int64  `json:"size"`
+	MtimeNS      int64  `json:"mtime_ns"`
 }
 
 // LandResult is the outcome of pulling one item.
@@ -50,7 +53,7 @@ const maxResumes = 8
 // Land pulls items from src into root, directly, resuming each from its
 // job-owned temp at the exact byte offset after a dropped connection
 // (failing over to the next path when Path Radar has one) and verifying
-// the whole file against the source's SHA-256 before publication.
+// the whole file against the source's selected checksum before publication.
 func (n *Node) Land(ctx context.Context, src *Client, transferID, grant, root string, items []LandItem, h LandHooks) []LandResult {
 	out := make([]LandResult, 0, len(items))
 	for _, it := range items {
@@ -60,8 +63,12 @@ func (n *Node) Land(ctx context.Context, src *Client, transferID, grant, root st
 }
 
 func (n *Node) landOne(ctx context.Context, src *Client, tid, grant, rootPath string, it LandItem, h LandHooks) LandResult {
+	it.ChecksumAlgo = cmp.Or(it.ChecksumAlgo, checksum.SHA256)
 	res := LandResult{ItemID: it.ItemID, Status: "failed"}
 	fail := func(err error) LandResult { res.Error = err.Error(); return res }
+	if !checksum.Valid(it.ChecksumAlgo) {
+		return fail(fmt.Errorf("unsupported checksum %q", it.ChecksumAlgo))
+	}
 	root, err := storage.OpenRoot(rootPath)
 	if err != nil {
 		return fail(err)
@@ -95,7 +102,7 @@ func (n *Node) landOne(ctx context.Context, src *Client, tid, grant, rootPath st
 			_ = dir.Remove(part)
 			return fail(err)
 		}
-		got, mode, err := verifyPart(ctx, dir, part)
+		got, mode, err := verifyPart(ctx, dir, part, it.ChecksumAlgo)
 		if err != nil {
 			_ = dir.Remove(part)
 			return fail(err)
@@ -126,13 +133,13 @@ func (n *Node) landOne(ctx context.Context, src *Client, tid, grant, rootPath st
 }
 
 // pull fetches from *offset to EOF into part, reconnecting on network
-// errors, and returns the source's whole-file SHA-256 trailer.
+// errors, and returns the source's whole-file checksum trailer.
 func (n *Node) pull(ctx context.Context, src *Client, tid, grant string, dir *storage.Dir, part string, it LandItem, offset *int64, res *LandResult, h LandHooks) (string, error) {
 	for attempt := 0; ; attempt++ {
 		if *offset == 0 {
 			_ = dir.Remove(part)
 		}
-		resp, err := src.Fetch(ctx, tid, it.ItemID, grant, *offset)
+		resp, err := src.fetch(ctx, tid, it.ItemID, grant, *offset, it.ChecksumAlgo)
 		if err != nil {
 			if !netError(err) || attempt >= maxResumes {
 				return "", err
@@ -161,13 +168,16 @@ func (n *Node) pull(ctx context.Context, src *Client, tid, grant string, dir *st
 		*offset += nw
 		serr := f.Sync()
 		_ = f.Close()
-		trailer, terr := resp.Trailer.Get("X-Ferry-SHA256"), resp.Trailer.Get("X-Ferry-Error")
+		trailer, terr := resp.Trailer.Get(hashTrailer(it.ChecksumAlgo)), resp.Trailer.Get("X-Ferry-Error")
 		_ = resp.Body.Close()
 		if serr != nil {
 			return "", serr
 		}
 		if cerr == nil && terr != "" {
 			return "", fmt.Errorf("%w: %s", storage.ErrSourceChanged, terr)
+		}
+		if cerr == nil && trailer == "" && it.ChecksumAlgo != checksum.SHA256 {
+			return "", fmt.Errorf("source peer did not return a %s checksum", it.ChecksumAlgo)
 		}
 		if cerr == nil && trailer != "" && *offset == it.Size {
 			return trailer, nil
@@ -205,17 +215,26 @@ func (p progressWriter) Write(b []byte) (int, error) {
 // Pusher streams one item to a destination peer. Write the bytes, then
 // Finish with the source hash to receive the destination's verdict.
 type Pusher struct {
-	pw      *io.PipeWriter
-	trailer http.Header
-	done    chan struct{}
-	res     PushResult
-	err     error
+	pw         *io.PipeWriter
+	hashHeader string
+	trailer    http.Header
+	done       chan struct{}
+	res        PushResult
+	err        error
 }
 
 // Push opens a streaming PUT. The destination writes a job-owned temp,
 // verifies it by physical readback against the hash sent as a trailer,
 // and publishes without replacing anything.
 func (c *Client) Push(ctx context.Context, tid, itemID, root, destRel string, size, mtimeNS int64) (*Pusher, error) {
+	return c.push(ctx, tid, itemID, root, destRel, size, mtimeNS, checksum.SHA256)
+}
+
+func hashTrailer(algo string) string {
+	return http.CanonicalHeaderKey("X-Ferry-" + algo)
+}
+
+func (c *Client) push(ctx context.Context, tid, itemID, root, destRel string, size, mtimeNS int64, algo string) (*Pusher, error) {
 	pr, pw := io.Pipe()
 	q := url.Values{}
 	q.Set("root", root)
@@ -226,8 +245,9 @@ func (c *Client) Push(ctx context.Context, tid, itemID, root, destRel string, si
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("X-Ferry-Checksum", algo)
 	req.ContentLength = -1
-	p := &Pusher{pw: pw, trailer: http.Header{"X-Ferry-Sha256": nil}, done: make(chan struct{})}
+	p := &Pusher{pw: pw, hashHeader: hashTrailer(algo), trailer: http.Header{hashTrailer(algo): nil}, done: make(chan struct{})}
 	req.Trailer = p.trailer
 	go func() {
 		defer close(p.done)
@@ -253,7 +273,7 @@ func (p *Pusher) Write(b []byte) (int, error) { return p.pw.Write(b) }
 
 // Finish sends the trailer hash and waits for the verdict.
 func (p *Pusher) Finish(sourceHash string) (PushResult, error) {
-	p.trailer.Set("X-Ferry-Sha256", sourceHash)
+	p.trailer.Set(p.hashHeader, sourceHash)
 	_ = p.pw.Close()
 	<-p.done
 	return p.res, p.err
