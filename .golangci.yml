@@ -7,6 +7,12 @@ linters:
     - misspell
     - unconvert
   settings:
+    errcheck:
+      exclude-functions:
+        # Terminal output: a failed write to stdout/stderr has nowhere to go.
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Fprint
     gosec:
       excludes:
         # File paths come from the operator, plans and receipts by design;

@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 
@@ -46,6 +47,7 @@ func newRootCmd() *cobra.Command {
 			return err
 		},
 	})
+	addVerifyCmd(root, g)
 	return root
 }
 
@@ -63,21 +65,23 @@ func (e *exitError) Error() string {
 }
 
 func main() {
-	os.Exit(run(os.Args[1:]))
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func run(args []string) int {
+func run(args []string, stdout, stderr io.Writer) int {
 	root := newRootCmd()
 	root.SetArgs(args)
+	root.SetOut(stdout)
+	root.SetErr(stderr)
 	if err := root.Execute(); err != nil {
 		var ee *exitError
 		if errors.As(err, &ee) {
 			if ee.err != nil {
-				fmt.Fprintln(os.Stderr, "ferry:", ee.err)
+				fmt.Fprintln(stderr, "ferry:", ee.err)
 			}
 			return ee.code
 		}
-		fmt.Fprintln(os.Stderr, "ferry:", err)
+		fmt.Fprintln(stderr, "ferry:", err)
 		return 4
 	}
 	return 0
