@@ -129,8 +129,10 @@ an alternate socket.
 
 Run `make app-test` for Swift model, reducer and scratch-daemon tests.
 Launch the bundle executable with `FERRY_FIXTURE=1` for an isolated sample
-workspace. To capture the five fixture views, run:
+workspace. Dashboard opens with connected volumes, paired machines and transfer history.
+To capture all six fixture views at the two review widths, run:
 
 ```sh
 FERRY_FIXTURE=1 FERRY_SNAPSHOT_DIR="$PWD/dist/screens" dist/Ferry.app/Contents/MacOS/Ferry
+FERRY_FIXTURE=1 FERRY_SNAPSHOT_WIDTH=800 FERRY_SNAPSHOT_DIR="$PWD/dist/screens-compact" dist/Ferry.app/Contents/MacOS/Ferry
 ```

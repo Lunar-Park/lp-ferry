@@ -22,7 +22,7 @@ import Observation
   package var onApproval: ((JSON) -> Void)?
   package var sources = [Location]()
   package var targets = [Location]()
-  package var section = "Transfer"
+  package var section = "Dashboard"
   package var preset = ""
   package var policy = "keep_both"
   package var checksum = "sha256"
@@ -123,11 +123,14 @@ import Observation
     default: break
     }
   }
-  package func approve(_ plan: ReviewedPlan) async throws {
+  package func approve(_ plan: ReviewedPlan, startingTransfer: () -> Void = {}) async throws {
     guard plan.eligible else { throw RPCError(code: -32002, message: "Plan needs review") }
     var result: JSON = ["status": "approved"]
     if plan.status != "approved" { result = try await rpc("plan.approve", plan.reference) }
-    if result["status"] == "approved" { result = try await rpc("transfer.start", plan.reference) }
+    if result["status"] == "approved" {
+      startingTransfer()
+      result = try await rpc("transfer.start", plan.reference)
+    }
     review = nil
     section = "Activity"
     if result["status"] == "needs_attention" { error = result["reason"].text }

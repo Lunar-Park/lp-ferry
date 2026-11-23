@@ -37,7 +37,7 @@ import UserNotifications
     MenuBarExtra {
       MenuStatus(store: store)
     } label: {
-      Image(systemName: "shippingbox")
+      Image(systemName: "ferry")
       if !store.approvals.isEmpty {
         Text("\(store.approvals.count) pending")
       } else if !store.progress.isEmpty {

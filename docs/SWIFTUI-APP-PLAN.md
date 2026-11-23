@@ -16,32 +16,14 @@ Build a **standalone, native SwiftUI macOS app** (`lp-ferry/app/` → `dist/Ferr
 
 ## 2. Unified Park / Slate Visual Design System (Mandatory Styling Spec)
 
-Every view MUST follow the Lunar Park studio aesthetic — **calm mineral graphite, smoked translucent glass, warm ivory ink, neutral selection, and one burnished amber reserved strictly for the primary action and brand mark.** No default macOS system-blue buttons, no pure `#000000` backgrounds, no garish neon green status pills, and no literal hex colors scattered in view files.
+Ferry uses the maritime colors measured in the legacy brand guide and calibrated in the R-7/R-8 renderer. The rail mark follows the paths of `assets/brand/ferry-logo-black.svg`.
 
-### 2.1 Exact Color Tokens (`FerryTheme.swift`)
-Mirror `ParkKit.Palette` 1:1:
-- **Room & Surfaces:**
-  - `ground = #202225`, `groundDeep = #15171A`
-  - `plate = #27292C`, `plateHover = #303236`, `plateRaised = #3B3E42`, `well = #1D1F22`
-- **Hairlines & Rules:**
-  - `rule1 = #303337`, `rule2 = #3A3D41`, `rule3 = #464A4F`, `rule4 = #5B6066`
-  - `glassFill = white @ 2.5%`, `glassHover = white @ 4.5%`, `glassSelected = white @ 8%`, `glassLine = white @ 5.5%`, `glassEdge = white @ 10%`, `glassCard = white @ 1.8%`, `glassStrong = #2C2F33 @ 94%`
-- **Typography Ink (all clear 4.5:1 on ground/plate/well):**
-  - `ink1 = #EEEEE8` (warm ivory primary)
-  - `ink2 = #CED0CD`
-  - `ink3 = #B1B6B9`
-  - `ink4 = #9CA3AA`
-  - `ghost = #72787E`
-- **Accent (Primary Action & Brand Mark ONLY — never selection or generic status):**
-  - `accent = #DFAA6E`, `accentHover = #EDBA7E`, `accentSoft = #DFAA6E @ 9%`, `accentLine = #DFAA6E @ 32%`, `onAccent = #241B11`
-- **Selection (Strictly Neutral):**
-  - `sel = #D7DBDC`, `selSoft = #D7DBDC @ 9%`
-- **Status (Shape glyph + word FIRST, color THIRD — must read clearly in greyscale):**
-  - `ok = #B7BDC3` (calm smoked silver — verified / clean / online)
-  - `run = #80B9EF` (`runSoft = #1A2632`, `runLine = #80B9EF @ 34%` — streaming / verifying)
-  - `warn = #E2BC70` (`warnSoft = #28241C`, `warnLine = #E2BC70 @ 40%` — awaiting approval / needs review / partial / offline warning)
-  - `bad = #F07B74` (`badSoft = #2E1D1E` — failed / modified / blocked)
-  - `idle = #888C93`
+### 2.1 Color tokens
+
+- Recess the rail in `#0A1A2F`. Wash the `#142035` room with `#1E3350` from the upper left.
+- Build glass from `#1E2C48` over `#1D2B47`, with a directional sheen, `#3D4F74` rim and `#6E7C90` control edges.
+- Set the wordmark in bone and Ferry blue. Reserve interactive blue `#54A4E7` for filled actions, the active pipeline stage and progress.
+- Pair status words and glyphs with emerald for success, blue for activity, amber for approval or review, violet for attention and coral for failure.
 
 ### 2.2 Typography & Layout Rhythm
 - **Font:** Self-hosted `Inter.woff2` bundled in `Ferry.app/Contents/Resources/Inter.woff2` (registered via `CTFontManagerRegisterFontsForURL`), with clean system fallback if absent in unit tests.
@@ -52,13 +34,9 @@ Mirror `ParkKit.Palette` 1:1:
 - **Spacing Scale (`Space`):** `4, 8, 12, 16, 20, 24, 32, 48`.
 
 ### 2.3 Surfaces, Glass, Buttons & Window Chrome
-- **Ambient Room (`FerryRoom`):** Mineral graphite `#202225` → `#15171A` vertical depth with subtle overhead soft studio radial glow (`white @ 3.5%` top-center) and subtle noise grain (static when `FERRY_SNAPSHOT=1` or `accessibilityReduceMotion` is on).
-- **Glass Panels (`paneGlass(radius: 14–16, glow: Color?)`):** Translucent dark smoke (`black @ 10%`), diagonal specular wash (`white @ 6% → 1% → 2.6%`), directional bevel stroke (`white @ 24% → 6% → 11%`), optional subtle status/amber halo (`strokeBorder` + soft blurred outer glow for active approval cards). Never heavy opaque flat gray boxes.
-- **Buttons (`PillButton` matching Slate's `SlateButtons.swift`):**
-  - `.primary` — solid burnished amber capsule (`accent`, `onAccent` semibold text) — used for ONE primary action per view (e.g., *Approve & Start Transfer*, *Build Plan*, *Verify on Disk*).
-  - `.secondary` — quiet ivory wash (`white @ 8%`, `12%` hover, `ink1` text, `white @ 6%` hairline).
-  - `.destructive` — soft coral wash (`bad @ 13%`, `20%` hover, `bad` text) — *Cancel Transfer*, *Revoke Peer*.
-  - Optional trailing monospaced keyboard hint (`↩`, `esc`, `⌘R`).
+- `FerryRoom` carries a static fine grain across the navy wash. Panels use the same light direction as Slate's smoked-glass surfaces.
+- `PillButton`, `Segments` and `FerryMenu` carry the interaction styling through sheets, tables and the composer.
+
 - **Window Chrome:** Dark `.preferredColorScheme(.dark)` full-size-content window (`titlebarAppearsTransparent = true`, `titleVisibility = .hidden`), unified custom titlebar (`WindowDragArea` + `FirstMouseHostingView`), overlay scrollers (`OverlayScrollers` hiding track bars at rest), and a clean `MenuBarExtra` status icon showing active transfer count / pending agent approvals badge.
 
 ---
@@ -105,12 +83,7 @@ lp-ferry/app/
 ## 4. Complete Feature & Interaction Surface
 
 ### 4.1 Left Navigation Rail (Matches Slate's Rail Rhythm)
-Resizable (210–300 pt, collapses cleanly to a 52 pt icon strip when narrow):
-1. **Transfer** — Compose & review plans (drag-and-drop folders/cards directly onto the window).
-2. **Activity** — Live transfers, amber-badged **Agent Approvals** (`awaiting_approval`), resumable `needs_attention` runs, and receipt history.
-3. **Machines & Drives** — Local drives (with live `drive.mounted`/`unmounted` updates & camera-card pills) + paired peers with Path Radar transport badges.
-4. **Presets & Destinations** — Saved destinations (with live `dest.resolve` health) + preset library & camera bindings.
-5. **Footer Status Pill** — Daemon version, peer name, online/offline glyph, click to open **Doctor** (`doctor.run`).
+The resizable rail collapses to an icon strip at compact widths. Dashboard opens on launch with transfer counters, mounted volumes, paired peers and recent transfers. Transfer, Activity, Machines & Drives, and Presets & Destinations share the same rail. The titlebar daemon pill opens Doctor.
 
 ### 4.2 Transfer Workspace & Interactive Before → After `plan.tree`
 - **Unified Sources → Destinations Composer:**
@@ -121,11 +94,11 @@ Resizable (210–300 pt, collapses cleanly to a 52 pt icon strip when narrow):
   - Builds plan via `plan.create`, displays plan summary strip (total files, bytes, copy/skip/exclude/needs_review counts, destination free-space safety check, findings list).
   - **Before → After Tree (`plan.tree`):** Interactive disclosure tree paging children on demand (`parent_path` + `next_cursor`), showing folder rollup counts, `renamed` / `conflict` / `excluded` badges, and `before → after` transform previews.
   - **Inline Resolution (`plan.resolve`):** Exclude a file/folder, adjust conflict policy, or assign a camera role — cleanly creates the successor plan and updates the fingerprint.
-  - **Exact-Fingerprint Approval:** Primary amber `PillButton` **"Approve & Start"** (disabled whenever `blocking_count > 0` or `needs_review > 0`) calls `plan.approve` + `transfer.start` with the reviewed `fingerprint`.
+  - **Exact-Fingerprint Approval:** Primary Ferry-blue `PillButton` **"Approve & Start"** (disabled whenever `blocking_count > 0` or `needs_review > 0`) calls `plan.approve` + `transfer.start` with the reviewed `fingerprint`.
 
 ### 4.3 Live Telemetry, Agent Approvals & Physical Verification (`Activity` + Right Inspector)
 - **Agent Approval Gate (`plan.awaiting_approval`):**
-  - Prominent amber-glow glass card at the top of Activity (and a subtle floating toast anywhere in the app + macOS `UNUserNotificationCenter` notification when backgrounded).
+  - Amber review card in the Activity inspector, a pending count in the rail and a macOS notification when backgrounded.
   - Shows **"Triggered by `<actor>`"**, policy reasons, full expandable `plan.tree` inspection, and human-only **Approve & Start** (`plan.approve`) or **Dismiss**.
 - **Two-Phase Live Progress (`transfer.progress`):**
   - Overall fraction + honest ETA + per-target rows showing transport tier badge (`Local SSD`, `Tier 2 · Wired LAN`, `Tier 4 · Tailscale`), separate **Write** and **Readback Verify** progress bars, current file, write/verify MB/s, and **Cancel** / **Resume** buttons.
@@ -154,5 +127,5 @@ Resizable (210–300 pt, collapses cleanly to a 52 pt icon strip when narrow):
 3. **Verification Gates:**
    - `cd app && swift test` passes (unit tests for `Models`, `Store` reducers, `Formatters`, and real-daemon JSON-RPC integration against a temporary `ferry daemon` in `mktemp -d`).
    - `make app` builds `dist/Ferry.app` cleanly with zero warnings/errors.
-   - Launch `FERRY_FIXTURE=1` (and against a live temporary `ferry daemon`) and capture/verify native UI renders for key screens (Transfer + `plan.tree`, Live Activity + Agent Approval, Machines & Drives, Presets & Destinations) confirming unified Park/Slate dark graphite + glass + amber accent styling and zero clipped text/controls.
+   - Launch `FERRY_FIXTURE=1` (and against a live temporary `ferry daemon`) and capture/verify native UI renders for key screens (Transfer + `plan.tree`, Live Activity + Agent Approval, Machines & Drives, Presets & Destinations) confirming maritime navy glass and Ferry-blue action styling and zero clipped text/controls.
    - Existing Go checks (`make vet && make race`) remain 100% green.

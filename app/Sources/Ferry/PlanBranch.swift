@@ -8,6 +8,7 @@ struct PlanBranch: View {
   let destination: String
   var parent = ""
   var depth = 0
+  let editRole: (JSON) -> Void
   let exclude: (JSON) -> Void
   @State private var nodes = [JSON]()
   @State private var expanded = Set<String>()
@@ -18,41 +19,70 @@ struct PlanBranch: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 9) {
       if parent.isEmpty && excluded > 0 {
-        Text("\(excluded) excluded from this destination").font(.inter(12))
+        HStack {
+          StateLabel(word: "excluded")
+          Text("\(excluded) entries").font(.inter(12))
+        }
       }
       ForEach(nodes, id: \.self) { node in
         let path = node["path"].text
-        HStack {
+        HStack(spacing: 10) {
           if node["kind"] == "dir" {
             Button {
               if !expanded.insert(path).inserted { expanded.remove(path) }
             } label: {
-              Label(
-                node["name"].text,
-                systemImage: expanded.contains(path) ? "chevron.down" : "chevron.right")
-            }.buttonStyle(.plain)
+              HStack(spacing: 6) {
+                Image(systemName: expanded.contains(path) ? "chevron.down" : "chevron.right").font(
+                  .caption2)
+                Image(systemName: "folder.fill").foregroundStyle(Palette.brand)
+                Text(node["name"].text).font(.inter(14, .semibold))
+              }
+            }
             Text("\(node["file_count"].count) files · \(Format.bytes(node["total_bytes"].count))")
-              .font(.inter(12)).foregroundStyle(Palette.ink3)
+              .font(.inter(11)).foregroundStyle(Palette.ink3)
           } else {
-            Detail(text: node["before"].text + "  →  " + path)
+            Image(systemName: "doc").foregroundStyle(Palette.brand)
+            VStack(alignment: .leading, spacing: 3) {
+              Text(node["name"].text).font(.inter(13, .semibold))
+              Text(node["before"].text + "  →  " + path).font(
+                .system(size: 10, design: .monospaced)
+              ).foregroundStyle(Palette.ink3)
+            }
           }
           Spacer()
-          Button("Exclude") { exclude(node) }
-        }
-        let badges = [
-          node["action"].text, node["conflict_kind"].text,
-          node["conflict_count"].count > 0 ? "\(node["conflict_count"].count) conflicts" : "",
-          node["renamed_count"].count > 0 ? "renamed" : "",
-        ].filter { !$0.isEmpty }
-        if !badges.isEmpty {
-          Text(badges.joined(separator: " · ")).font(.inter(11)).foregroundStyle(Palette.ink4)
+          if node["action"].text != "" {
+            StateLabel(word: node["action"] == "exclude" ? "excluded" : node["action"].text)
+          }
+          if node["renamed_count"].count > 0 { StateLabel(word: "renamed") }
+          if !node["conflict_kind"].text.isEmpty && node["action"] != "needs_review" {
+            Text(node["conflict_kind"].text.replacingOccurrences(of: "_", with: " ")).font(
+              .inter(11)
+            ).foregroundStyle(Palette.ink3)
+          } else if node["kind"] == "dir" && node["conflict_count"].count > 0 {
+            Text("\(node["conflict_count"].count) conflicts").font(.inter(11)).foregroundStyle(
+              Palette.warn)
+          }
+          if node["kind"] == "file" {
+            Button {
+              editRole(node)
+            } label: {
+              Image(systemName: "camera")
+            }.help("Assign camera role").accessibilityLabel("Assign camera role")
+          }
+          Button {
+            exclude(node)
+          } label: {
+            Image(systemName: "minus.circle")
+          }.help("Exclude " + path).accessibilityLabel("Exclude " + path)
         }
         if expanded.contains(path) {
           PlanBranch(
             store: store, planID: planID, destination: destination, parent: path, depth: depth + 1,
-            exclude: exclude
+            editRole: editRole, exclude: exclude
           )
-          .padding(.leading, depth < 4 ? 12 : 0)
+          .padding(.leading, depth < 8 ? 16 : 3).overlay(alignment: .leading) {
+            Rectangle().fill(Palette.rim).frame(width: 1)
+          }
         }
         Divider()
       }
@@ -74,6 +104,11 @@ struct PlanBranch: View {
           "cursor": .string(cursor), "limit": 50,
         ])
       try Task.checkCancellation()
+      if !loaded && depth == 0,
+        let first = result["children"].rows.first(where: { $0["kind"] == "dir" })
+      {
+        expanded.insert(first["path"].text)
+      }
       nodes += result["children"].rows
       excluded = result["excluded_count"].count
       cursor = result["next_cursor"].text

@@ -21,7 +21,7 @@ import FerryCore
       window.setContentSize(NSSize(width: max(800, width), height: 790))
       let scenes =
         store.fixture
-        ? ["Transfer", "Plan", "Activity", "Machines & Drives", "Presets & Destinations"]
+        ? ["Dashboard", "Transfer", "Plan", "Activity", "Machines & Drives", "Presets & Destinations"]
         : ["Transfer"]
       for scene in scenes {
         store.review = scene == "Plan" ? try await store.rpc("plan.create") : nil
