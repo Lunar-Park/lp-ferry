@@ -26,6 +26,24 @@ final class FerryTests: XCTestCase {
     XCTAssertEqual(Format.eta(61), "1m 1s")
     XCTAssertFalse(Format.bytes(140000).isEmpty)
   }
+  /// The app opens on Transfer, and the fixture can name every copy by its route, so no
+  /// screen has to fall back to a bare transfer id.
+  @MainActor func testFixtureOpensOnTransferWithRoutes() async throws {
+    let store = Store(fixture: true)
+    XCTAssertEqual(store.section, "Transfer")
+    XCTAssertTrue(store.sources.isEmpty && store.targets.isEmpty)
+    for row in store.transfers {
+      let plan = row["plan_id"]
+      XCTAssertFalse(plan.text.isEmpty, "transfer \(row["id"].text) has no plan")
+      let entries = try await store.rpc("plan.entries", ["plan_id": plan, "limit": 1])
+      XCTAssertFalse(entries["entries"].rows.first?["source_label"].text.isEmpty ?? true)
+      let summary = try await store.rpc("plan.get", ["plan_id": plan])
+      XCTAssertFalse(summary["destinations"].rows.first?["label"].text.isEmpty ?? true)
+    }
+    let request = try XCTUnwrap(store.approvals.values.first)
+    XCTAssertEqual(request["status"], "awaiting_approval")
+    XCTAssertGreaterThan(request["counts"]["copy"].count, 0)
+  }
   @MainActor func testEventReduction() {
     let store = Store(fixture: false)
     let drive: JSON = ["topic": "drive.mounted", "data": ["mount_path": "/card"]]

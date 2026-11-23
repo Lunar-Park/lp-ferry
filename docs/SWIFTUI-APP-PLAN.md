@@ -35,9 +35,11 @@ Ferry carries a standalone port of the Lunar Park style kit in `app/Sources/Ferr
 
 ### 2.3 Surfaces, Glass, Buttons & Window Chrome
 - **Room and glass (`Design/Glass.swift`, `Design/FerryRoomShader.swift`):** one Metal view draws the living room for the whole window. Every `GlassSurface` reports its frame; the shader bends, frosts (five taps) and colour-fringes the room inside each pane, with a lens rim, and drops a soft shadow outside it. Panes inside a `GlassScroll` stop bending where the scroll view ends. `RoomRenderer.snapshot` draws the same pass into an image, so fixture screenshots show the real refraction. `FERRY_STILL=1` holds the room still.
-- **Hierarchy:** primary lists (sources & peers, recent transfers, the `plan.tree`, the activity log, presets) sit open on the room, split by `white @ 7%` hairlines. Glass is kept for what is raised: the transfer crossing now, approval cards, endpoint and destination cards, inspectors, sheets.
-- **Buttons and fields (`Design/Buttons.swift`):** `ParkButtonStyle` only: `primary` (ferry-blue tinted glass pill, lit blue rim, ice-blue words), `standard` (clear glass pill), `quiet` (words, a faint wash on hover), `destructive` (coral-tinted glass). Hover lifts a point, press scales to 0.97. Inputs are `parkField` sunk pills; menus are `GlassMenu` glass pills, never the grey system pop-up.
-- **Shell (`Design/Shell.swift`):** no sidebar box. The rail is 40 pt glass discs on the traffic lights' axis (`Page.gutter = 28`), the current place a mist disc; Dashboard carries the ship. One open `Head.band = 64` head carries the page title, and the corner holds three glass discs: search, approvals (with its count) and this Mac's daemon (status dot; opens Ferry Doctor). Ferry Doctor also sits at the foot of the rail.
+- **Three places (`Design/Shell.swift`):** the rail is three 40 pt glass discs on the traffic lights' axis (`Page.gutter = 28`), the current one a mist disc, with Ferry Doctor at the foot. ⌘1–3 jump between them. The `Head.band = 64` head carries only the page title (and a calm "Connecting to Ferry…" pill while the daemon is away). There are no corner discs.
+  - **Transfer** (home, carries the ship): a live banner only while a copy runs or an agent waits, then one card asking *From* and *To*. Mounted cards and drives, saved destinations, other drives and paired machines are one-click pick rows, with a drop row and Choose menu under each. Options (folder layout, conflict policy, checksum, camera names) stay folded into one summary line. One primary, **Review transfer**, leads to the second stage, **Review & copy** (`PlanReview`: a sentence, the space check, **Start verified copy** or **Approve & start**, then what lands where).
+  - **Activity**: All · Active · Approvals · Completed. List rows are titled by route ("A004 → Studio archive", "Claude · Studio archive", resolved by `Routes` from `plan.get` + `plan.entries`); ids appear only as mono metadata in the detail. The detail card holds the Written / Verified on disk bars, Cancel, Resume, and the receipt with **Verify on disk**.
+  - **Devices**: *Drives & machines* (Copy from →, Check speeds, Copy to →, Pair machine) and *Destinations & layouts* (saved destinations, folder layouts, editors in sheets).
+- **Glass budget:** the room, the rail's discs, the one primary button of a screen, and one or two focal containers (the live banner and the From → To card; the review card; the Activity detail; sheets). Everything else is flat: secondary buttons and menus are soft flat plates, status pills are faint tinted words, transport tags are plain text.
 - **Window chrome:** full-size-content window with a transparent title bar; `WindowChrome` centres the traffic lights in the head band. `FirstMouseHostingView`, `WindowDragArea` and overlay scrollers stay. The `MenuBarExtra` shows active transfers and pending approvals.
 
 ---
@@ -58,7 +60,7 @@ lp-ferry/app/
 │   └── Ferry/                     # SwiftUI macOS App
 │       ├── FerryApp.swift         # App entry, WindowGroup, MenuBarExtra, UNUserNotificationCenter for agent approvals
 │       ├── Design/                # Theme, FerryRoomShader, Glass, Buttons, Shell, LineIcon, Components, ShipMark, Window
-│       ├── MainShell.swift        # Room + glass-disc rail + open head band + page, corner discs
+│       ├── MainShell.swift        # Room + three-disc rail + open head band + page
 │       ├── Views/
 │       │   ├── TransferWorkspaceView.swift   # Unified local, multi-dest fan-out & P2P send composer + Plan trigger
 │       │   ├── PlanTreeView.swift            # Lazy-paged Before → After `plan.tree` browser + conflict/camera/exclusion resolution

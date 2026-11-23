@@ -22,7 +22,7 @@ import Observation
   package var onApproval: ((JSON) -> Void)?
   package var sources = [Location]()
   package var targets = [Location]()
-  package var section = "Dashboard"
+  package var section = "Transfer"
   package var preset = ""
   package var policy = "keep_both"
   package var checksum = "sha256"

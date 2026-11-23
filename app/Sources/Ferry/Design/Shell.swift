@@ -2,10 +2,11 @@ import AppKit
 import FerryCore
 import SwiftUI
 
-// The window's spatial shell, ported from the Lunar Park style kit
+// The window's spatial shell, after the Lunar Park style kit
 // (park/apple/Sources/ParkNative/Shell.swift): glass discs floating on the room down the
-// traffic lights' axis, one open head band over every page, and the window's own discs in
-// the top-right corner. There is no sidebar box: the rail is the room with discs on it.
+// traffic lights' axis and one open head band over every page. Ferry has three places, so
+// the rail has three discs; the head carries nothing but the page's title until the daemon
+// needs attention.
 
 /// Where a page sits beside the rail. One gutter runs from the window's edge to the rail's
 /// discs, from the discs to the page, and from the page to the window's right edge.
@@ -20,8 +21,8 @@ enum Page {
   static let left: CGFloat = rail + gutter
 }
 
-/// The window's top band, one height on every page: the traffic lights, the page's title and
-/// the window's discs all sit on its midline, as a Mac toolbar window's do.
+/// The window's top band, one height on every page: the traffic lights and the page's title
+/// sit on its midline, as a Mac toolbar window's do.
 enum Head {
   static let band: CGFloat = 64
   /// The height of every control in the band.
@@ -30,44 +31,47 @@ enum Head {
   static var content: CGFloat { band }
 }
 
-/// Ferry's places, in the order the rail reads them.
+/// Ferry's three places: start a copy, watch and check copies, set up where things live.
 enum Place: String, CaseIterable, Identifiable {
-  case dashboard = "Dashboard"
   case transfer = "Transfer"
   case activity = "Activity"
-  case machines = "Machines & Drives"
-  case presets = "Presets & Destinations"
+  case devices = "Devices"
 
   var id: String { rawValue }
-  /// The rail's word under the disc.
-  var short: String {
-    switch self {
-    case .machines: "Machines"
-    case .presets: "Presets"
-    default: rawValue
-    }
-  }
   var glyph: LineIcon? {
     switch self {
-    case .dashboard: nil  // the ship mark
-    case .transfer: .transfer
+    case .transfer: nil  // the ship
     case .activity: .activity
-    case .machines: .machines
-    case .presets: .presets
+    case .devices: .machines
+    }
+  }
+  var shortcut: KeyEquivalent {
+    switch self {
+    case .transfer: "1"
+    case .activity: "2"
+    case .devices: "3"
     }
   }
 }
 
-/// What the shell and its pages share that the daemon does not own.
+/// What the pages share that the daemon does not own.
 @MainActor @Observable final class Chrome {
-  /// Bumped to put the cursor in Activity's search field.
-  var searchRequest = 0
   var activityFilter = "All"
+  /// The Activity record to open on arrival (a transfer or plan id).
+  var activitySelection = ""
+  var devicesTab = DevicesTab.drives.rawValue
+  var optionsOpen = false
   var doctor = false
+  let routes = Routes()
+
+  func open(_ id: String, in store: Store) {
+    activityFilter = "All"
+    activitySelection = id
+    store.section = Place.activity.rawValue
+  }
 }
 
-/// The rail: Ferry's places as glass discs, a rule between the work and the library, then
-/// Ferry Doctor at the foot.
+/// The rail: Ferry's three places as glass discs, then Ferry Doctor at the foot.
 struct Rail: View {
   @Bindable var store: Store
   let chrome: Chrome
@@ -75,27 +79,30 @@ struct Rail: View {
   var body: some View {
     VStack(spacing: Space.s4) {
       ForEach(Place.allCases) { place in
-        if place == .machines {
-          Rectangle().fill(Palette.rule2).frame(width: 40, height: 1).padding(.vertical, 2)
-        }
         RailButton(
-          glyph: place.glyph, label: place.short, current: store.section == place.rawValue,
+          glyph: place.glyph, label: place.rawValue, current: store.section == place.rawValue,
           badge: place == .activity ? store.approvals.count : 0
         ) {
           store.section = place.rawValue
         }
+        .keyboardShortcut(place.shortcut, modifiers: .command)
+        .help("\(place.rawValue) (⌘\(String(place.shortcut.character)))")
       }
       Spacer(minLength: Space.s4)
       Button {
         chrome.doctor = true
       } label: {
-        LineIcon.doctor.stroke(
-          Palette.ink3, style: StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round)
-        )
-        .frame(width: 18, height: 18)
+        VStack(spacing: 6) {
+          LineIcon.doctor.stroke(
+            Palette.ink3, style: StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round)
+          )
+          .frame(width: 18, height: 18)
+          Text("Doctor").font(.inter(11)).foregroundStyle(Palette.ink4)
+        }
+        .contentShape(Rectangle())
       }
-      .buttonStyle(.park(.standard, disc: true))
-      .help("Ferry Doctor")
+      .buttonStyle(.plain)
+      .help("Ferry Doctor: check the daemon, disks and paired machines")
       .accessibilityLabel("Ferry Doctor")
     }
     // The traffic lights sit in this column's part of the band; the first disc lines up with
@@ -108,7 +115,7 @@ struct Rail: View {
 }
 
 /// A place on the rail: a disc of the room's glass with a line icon, and the mist disc for the
-/// place you are in. Dashboard carries the ship.
+/// place you are in. Transfer carries the ship.
 struct RailButton: View {
   let glyph: LineIcon?
   let label: String
@@ -158,7 +165,7 @@ struct RailButton: View {
     .buttonStyle(.plain)
     .animation(.spring(response: 0.25, dampingFraction: 0.7), value: hovering)
     .onHover { hovering = $0 }
-    .accessibilityLabel(label)
+    .accessibilityLabel(badge > 0 ? "\(label), \(badge) waiting" : label)
     .accessibilityAddTraits(current ? .isSelected : [])
   }
 }
@@ -175,8 +182,8 @@ struct Badge: View {
   }
 }
 
-/// The page's first line: its title in the band, then whatever the page puts beside it. The
-/// window's own discs are not part of it; `Floaters` draws them once for every page.
+/// The page's first line: its title in the band, a quiet note beside it, and whatever the
+/// page puts at the trailing edge. When the daemon is away, a calm pill says so.
 struct PageHead<Trailing: View>: View {
   let title: String
   var note: String? = nil
@@ -192,8 +199,7 @@ struct PageHead<Trailing: View>: View {
       }
       Spacer(minLength: Space.s4)
       trailing
-      // The corner the floating discs sit in.
-      Color.clear.frame(width: Floaters.width + Space.s4, height: 1)
+      HealthPill()
     }
     .frame(height: Head.band)
     .background(WindowDragArea())
@@ -206,131 +212,46 @@ extension PageHead where Trailing == EmptyView {
   }
 }
 
-/// Search, approvals and this Mac's daemon, in the window's top-right corner over every page.
-struct Floaters: View {
-  static let disc: CGFloat = 36
-  static let width: CGFloat = 3 * disc + 2 * Space.s2
-  static let top: CGFloat = (Head.band - disc) / 2
+private struct StoreKey: EnvironmentKey {
+  static let defaultValue: Store? = nil
+}
 
-  @Bindable var store: Store
-  let chrome: Chrome
-  @State private var status = false
+private struct ChromeKey: EnvironmentKey {
+  static let defaultValue: Chrome? = nil
+}
 
-  var body: some View {
-    HStack(spacing: Space.s2) {
-      FloatDisc(help: "Search activity (⌘F)") {
-        store.section = Place.activity.rawValue
-        chrome.searchRequest += 1
-      } label: {
-        icon(.search)
-      }
-      .keyboardShortcut("f")
-      FloatDisc(
-        help: store.approvals.isEmpty
-          ? "Approvals" : "Approvals: \(store.approvals.count) waiting for you",
-        lit: !store.approvals.isEmpty && store.section == Place.activity.rawValue
-          && chrome.activityFilter == "Approvals"
-      ) {
-        chrome.activityFilter = "Approvals"
-        store.section = Place.activity.rawValue
-      } label: {
-        icon(.tray)
-      }
-      .overlay(alignment: .topTrailing) {
-        if !store.approvals.isEmpty { Badge(count: store.approvals.count).offset(x: 3, y: -3) }
-      }
-      FloatDisc(help: daemonHelp) {
-        status.toggle()
-      } label: {
-        Text(String((store.status["name"].text.isEmpty ? "F" : store.status["name"].text).prefix(1)))
-          .font(.inter(TypeScale.sm, .semibold)).foregroundStyle(Palette.ink1)
-      }
-      .overlay(alignment: .bottomTrailing) {
-        Circle().fill(store.online ? Palette.ok : Palette.warn).frame(width: 9, height: 9)
-          .overlay(Circle().strokeBorder(Palette.groundDeep, lineWidth: 2))
-          .offset(x: 1, y: 1)
-      }
-      .popover(isPresented: $status, arrowEdge: .bottom) {
-        DaemonCard(store: store) {
-          status = false
-          chrome.doctor = true
-        }
-      }
-    }
+extension EnvironmentValues {
+  var ferryStore: Store? {
+    get { self[StoreKey.self] }
+    set { self[StoreKey.self] = newValue }
   }
-
-  private var daemonHelp: String {
-    store.online
-      ? "\(store.status["name"].text) · daemon online · protocol v\(store.status["protocol"].count)"
-      : "Daemon offline · \(store.connectionNote)"
-  }
-
-  private func icon(_ glyph: LineIcon) -> some View {
-    glyph.stroke(Palette.ink1, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
-      .frame(width: 17, height: 17)
+  var chrome: Chrome? {
+    get { self[ChromeKey.self] }
+    set { self[ChromeKey.self] = newValue }
   }
 }
 
-/// A floating disc of clear glass.
-struct FloatDisc<Label: View>: View {
-  let help: String
-  var lit = false
-  let action: () -> Void
-  @ViewBuilder var label: Label
-  @State private var hovering = false
+/// Nothing while the daemon is with us; a quiet amber pill while it is not, which opens
+/// Ferry Doctor.
+struct HealthPill: View {
+  @Environment(\.ferryStore) private var store
+  @Environment(\.chrome) private var chrome
 
   var body: some View {
-    Button(action: action) {
-      label
-        .frame(width: Floaters.disc, height: Floaters.disc)
-        .background {
-          if lit {
-            Circle().fill(Palette.sel.opacity(0.18))
-          }
-          GlassSurface(radius: Floaters.disc / 2, style: hovering ? GlassStyle(smoke: 0, sheen: 1.8) : .control)
+    if let store, !store.online {
+      Button {
+        chrome?.doctor = true
+      } label: {
+        HStack(spacing: 7) {
+          Circle().fill(Palette.warn).frame(width: 7, height: 7)
+          Text("Connecting to Ferry…").font(.inter(13, .medium)).foregroundStyle(Palette.ink2)
         }
-        .contentShape(Circle())
-        .offset(y: hovering ? -1 : 0)
-    }
-    .buttonStyle(.plain)
-    .animation(.spring(response: 0.25, dampingFraction: 0.7), value: hovering)
-    .onHover { hovering = $0 }
-    .help(help)
-    .accessibilityLabel(help)
-  }
-}
-
-/// The daemon at a glance, from the corner disc.
-struct DaemonCard: View {
-  let store: Store
-  let doctor: () -> Void
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: Space.s3) {
-      HStack(spacing: Space.s2) {
-        Circle().fill(store.online ? Palette.ok : Palette.warn).frame(width: 8, height: 8)
-        Text(store.online ? "Daemon online" : "Daemon offline").font(.inter(TypeScale.base, .semibold))
+        .padding(.horizontal, 12).frame(height: 28)
+        .background(Capsule().fill(Palette.warn.opacity(0.10)))
       }
-      VStack(alignment: .leading, spacing: 5) {
-        fact("Machine", store.fixture ? "Fixture session" : store.status["name"].text)
-        fact("Version", store.status["version"].text)
-        fact("Protocol", store.online ? "v\(store.status["protocol"].count)" : "—")
-        if !store.online { fact("Note", store.connectionNote) }
-      }
-      Button("Run Ferry Doctor", action: doctor).buttonStyle(.park(.standard, .small))
+      .buttonStyle(.plain)
+      .help(store.connectionNote)
     }
-    .padding(Space.s5)
-    .frame(width: 260, alignment: .leading)
-    .foregroundStyle(Palette.ink1)
-  }
-
-  private func fact(_ name: String, _ value: String) -> some View {
-    HStack {
-      Text(name).foregroundStyle(Palette.ink3)
-      Spacer()
-      Text(value.isEmpty ? "—" : value).foregroundStyle(Palette.ink1).lineLimit(1)
-    }
-    .font(.inter(TypeScale.xs))
   }
 }
 

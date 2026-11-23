@@ -1,16 +1,16 @@
 import FerryCore
 import SwiftUI
 
-/// The plan under review: the before → after tree as an open list on the room, and beside it
-/// one glass inspector with the destination, the space check and the decision.
+/// The second stage: one card that says what will happen in a sentence, whether it fits, and
+/// the one button that starts it; under it, the list of what lands where.
 struct PlanReview: View {
   let store: Store
+  let chrome: Chrome
   let plan: JSON
   @State private var selected = ""
   @State private var sourceLabel = ""
   @State private var role = ""
   @State private var editingRole = false
-  @State private var stage = 2
   @State private var busy = false
 
   var destination: String {
@@ -22,24 +22,28 @@ struct PlanReview: View {
   private var current: JSON {
     plan["destinations"].rows.first { $0["id"].text == destination } ?? .null
   }
+  /// An agent's plan, held for a person to approve.
+  private var request: Bool {
+    plan["status"] == "awaiting_approval" || plan["actor"].text.hasPrefix("agent:")
+  }
 
   var body: some View {
     PageFrame {
-      PageHead(title: "Transfer") { Steps(active: stage) }
-    } content: { width in
-      Columns(width: width, side: 320) {
+      PageHead(title: "Transfer") { StageMarker(reviewing: true) }
+    } content: { _ in
+      VStack(alignment: .leading, spacing: Space.s7) {
+        card
         tree
-      } side: {
-        inspector
       }
     }
+    .task { await chrome.routes.load([plan["plan_id"].text], store: store) }
     .sheet(isPresented: $editingRole) {
-      SheetPage(title: "Assign camera role", height: 340) {
-        FieldLabel("Source label")
-        TextField("Source label", text: $sourceLabel)
-        FieldLabel("Camera role")
+      SheetPage(title: "Name the camera", height: 340) {
+        FieldLabel("Card or folder")
+        TextField("A004", text: $sourceLabel)
+        FieldLabel("Camera name")
         TextField("A camera, B camera…", text: $role)
-        Button("Revise plan") {
+        Button("Update the plan") {
           editingRole = false
           revise(["camera_roles": .object([sourceLabel: .string(role)])])
         }
@@ -49,34 +53,70 @@ struct PlanReview: View {
     }
   }
 
-  // MARK: The tree
+  // MARK: The card
 
-  private var tree: some View {
+  private var title: String {
+    if let route = chrome.routes.route(plan["plan_id"].text), !route.title.isEmpty, request {
+      return route.title
+    }
+    let from = store.sources.map(\.label).joined(separator: ", ")
+    let to = plan["destinations"].rows.map { $0["label"].text }.joined(separator: ", ")
+    if !from.isEmpty && !request { return "\(from) → \(to)" }
+    return chrome.routes.route(plan["plan_id"].text)?.title.nilIfEmpty ?? "To \(to)"
+  }
+
+  private var counts: String {
+    let c = plan["counts"]
+    var parts = [String]()
+    let copy = c["copy"].count
+    parts.append("\(copy) \(copy == 1 ? "file" : "files") · \(Format.bytes(plan["total_bytes"].count))")
+    if c["skip_identical"].count > 0 { parts.append("\(c["skip_identical"].count) already there") }
+    if c["exclude"].count > 0 { parts.append("\(c["exclude"].count) left out") }
+    return parts.joined(separator: "  ·  ")
+  }
+
+  private var safe: Bool {
+    let targets = plan["destinations"].rows
+    return !targets.isEmpty
+      && targets.allSatisfy {
+        $0["free_bytes"] != .null
+          && $0["free_bytes"].count - $0["required_bytes"].count >= $0["reserve_bytes"].count
+      }
+  }
+
+  private var card: some View {
     VStack(alignment: .leading, spacing: Space.s5) {
-      VStack(alignment: .leading, spacing: Space.s2) {
-        HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
-          Text(Format.bytes(plan["total_bytes"].count)).font(.inter(TypeScale.xl, .semibold))
-            .tracking(-0.6).foregroundStyle(Palette.bone)
-          Text("to copy").font(.inter(TypeScale.lg)).foregroundStyle(Palette.ink3)
-        }
-        HStack(spacing: Space.s2) {
-          ForEach(["copy", "skip_identical", "dir", "exclude", "needs_review"], id: \.self) { key in
-            if plan["counts"][key].count > 0 {
-              HStack(spacing: 5) {
-                Text("\(plan["counts"][key].count)").font(.inter(13, .semibold)).foregroundStyle(Palette.ink1)
-                Text(key == "dir" ? "folders" : display(key).lowercased()).font(.inter(13))
-                  .foregroundStyle(Palette.ink3)
-              }
-              .padding(.horizontal, 10).frame(height: 24)
-              .background(Capsule().fill(Color.white.opacity(0.05)))
+      HStack(alignment: .top, spacing: Space.s5) {
+        VStack(alignment: .leading, spacing: Space.s2) {
+          if request {
+            HStack(spacing: 6) {
+              Image(systemName: "hand.raised").font(.system(size: 11, weight: .semibold))
+              Text("Requested by \(Routes.actor(plan))").font(.inter(13, .semibold))
             }
+            .foregroundStyle(Palette.warn)
           }
-          if plan["actor"].text.hasPrefix("agent:") {
-            Text("Requested by " + plan["actor"].text.dropFirst(6)).font(.inter(13, .medium))
-              .foregroundStyle(Palette.warn)
-              .padding(.horizontal, 10).frame(height: 24)
-              .background(Capsule().fill(Palette.warn.opacity(0.12)))
+          Text(title).font(.inter(26, .semibold)).tracking(-0.5).foregroundStyle(Palette.bone)
+            .lineLimit(2)
+          Text(counts).font(.inter(TypeScale.base)).foregroundStyle(Palette.ink2)
+          if plan["counts"]["needs_review"].count > 0 {
+            Text("\(plan["counts"]["needs_review"].count) need a decision before copying")
+              .font(.inter(TypeScale.sm, .medium)).foregroundStyle(Palette.warn)
           }
+        }
+        Spacer(minLength: Space.s4)
+        HStack(spacing: Space.s2) {
+          Button("Back") { store.review = nil }
+            .buttonStyle(.quiet)
+            .keyboardShortcut(.cancelAction)
+          Button {
+            guard let reviewed else { return }
+            run { try await store.approve(reviewed) }
+          } label: {
+            Label(request ? "Approve & start" : "Start verified copy", systemImage: "checkmark")
+          }
+          .buttonStyle(.primary)
+          .keyboardShortcut(.defaultAction)
+          .disabled(reviewed?.eligible != true || !store.online || busy)
         }
       }
       ForEach(plan["findings"].rows, id: \.self) { finding in
@@ -86,123 +126,85 @@ struct PlanReview: View {
         }
         .foregroundStyle(Palette.warn)
       }
-      VStack(alignment: .leading, spacing: 0) {
-        HStack(alignment: .center) {
-          SectionTitle("Before → After")
-          if plan["destinations"].rows.count > 1 {
-            GlassMenu(title: current["label"].text, icon: "externaldrive", size: .small) {
-              ForEach(plan["destinations"].rows, id: \.self) { d in
-                Button(d["label"].text) { selected = d["id"].text }
-              }
-            }
-          }
+      Hairline()
+      HStack(spacing: Space.s4) {
+        Image(systemName: safe ? "checkmark.shield" : "exclamationmark.triangle")
+          .font(.system(size: 15, weight: .medium))
+          .foregroundStyle(safe ? Palette.ok : Palette.warn)
+        VStack(alignment: .leading, spacing: 3) {
+          Text(safe ? "Fits on \(current["label"].text)" : "Not enough room on \(current["label"].text)")
+            .font(.inter(TypeScale.sm, .semibold)).foregroundStyle(Palette.ink1)
+          Text(
+            "Needs \(Format.bytes(current["required_bytes"].count)) of \(Format.bytes(current["free_bytes"].count)) free. Every file is read back and checked after it lands."
+          )
+          .font(.inter(13)).foregroundStyle(Palette.ink3).fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.bottom, Space.s3)
-        Hairline(color: Palette.rule2)
-        PlanBranch(
-          store: store, planID: plan["plan_id"], destination: destination,
-          editRole: { node in
-            sourceLabel = String(node["before"].text.split(separator: ":", maxSplits: 1).first ?? "")
-            role = ""
-            editingRole = true
-          }, exclude: exclude
-        )
-        .id(destination)
+        Spacer(minLength: Space.s4)
+        let share = current["required_bytes"].double / max(1, current["free_bytes"].double)
+        if share >= 0.1 || !safe {
+          Meter(fraction: share, color: safe ? Palette.accent : Palette.warn).frame(width: 140)
+        }
       }
-    }
-  }
-
-  // MARK: The inspector
-
-  private var inspector: some View {
-    let targets = plan["destinations"].rows
-    let safe =
-      !targets.isEmpty
-      && targets.allSatisfy {
-        $0["free_bytes"] != .null
-          && $0["free_bytes"].count - $0["required_bytes"].count >= $0["reserve_bytes"].count
-      }
-    return VStack(alignment: .leading, spacing: Space.s5) {
-      VStack(alignment: .leading, spacing: Space.s4) {
-        FieldLabel("Landing on")
-        HStack(spacing: Space.s3) {
-          IconDisc(symbol: current["peer_id"].text.isEmpty ? "externaldrive" : "desktopcomputer", size: 38)
-          VStack(alignment: .leading, spacing: 4) {
-            Text(current["label"].text).font(.inter(TypeScale.md, .semibold)).foregroundStyle(Palette.bone)
-            Detail(
-              text: [current["peer_id"].text, current["root_path"].text].filter { !$0.isEmpty }
-                .joined(separator: "  "))
-          }
-        }
-        VStack(alignment: .leading, spacing: 6) {
-          Meter(
-            fraction: current["required_bytes"].double / max(1, current["free_bytes"].double),
-            color: safe ? Palette.accent : Palette.warn)
-          HStack {
-            Text(Format.bytes(current["required_bytes"].count) + " needed")
-            Spacer()
-            Text(Format.bytes(current["free_bytes"].count) + " free")
-          }
-          .font(.inter(TypeScale.xs)).foregroundStyle(Palette.ink3)
-        }
-        HStack(spacing: Space.s2) {
-          Image(systemName: safe ? "checkmark.shield" : "exclamationmark.triangle")
-            .font(.system(size: 13, weight: .medium))
-          Text(safe ? "Space check passed" : "Check destination space").font(.inter(TypeScale.sm, .medium))
-        }
-        .foregroundStyle(safe ? Palette.ok : Palette.warn)
-        Hairline()
-        fact("Fingerprint", plan["fingerprint"].text, mono: true)
-        fact("Checksum", plan["checksum_algo"].text.uppercased(), mono: false)
-        Fold(title: "Camera roles & conflict policy") {
-          VStack(alignment: .leading, spacing: Space.s3) {
-            GlassMenu(title: "Conflict policy", icon: "arrow.triangle.branch", size: .small) {
+      Fold(title: "Details") {
+        VStack(alignment: .leading, spacing: Space.s3) {
+          fact("Checked with", plan["checksum_algo"].text.uppercased())
+          fact("Landing in", [current["peer_id"].text == "local" ? "" : current["peer_id"].text, current["root_path"].text].filter { !$0.isEmpty }.joined(separator: " · "), mono: true)
+          fact("Plan", plan["plan_id"].text + " · " + plan["fingerprint"].text, mono: true)
+          HStack(spacing: Space.s3) {
+            GlassMenu(title: "If a file is already there", size: .small) {
               ForEach(policies, id: \.self) { p in
-                Button(display(p)) { revise(["conflict_policy": .string(p)]) }
+                Button(policyName(p)) { revise(["conflict_policy": .string(p)]) }
               }
             }
-            TextField("Source label", text: $sourceLabel)
-            TextField("Camera role", text: $role)
-            Button("Assign role") {
-              revise(["camera_roles": .object([sourceLabel: .string(role)])])
+            Button("Name a camera…") {
+              sourceLabel = store.sources.first?.label ?? ""
+              role = ""
+              editingRole = true
             }
-            .buttonStyle(.park(.standard, .small))
-            .disabled(sourceLabel.isEmpty || role.isEmpty)
+            .buttonStyle(.park(.quiet, .small))
           }
         }
-        Hairline()
-        HStack(spacing: Space.s3) {
-          Button {
-            guard let reviewed else { return }
-            run {
-              stage = 3
-              defer { stage = 2 }
-              try await store.approve(reviewed) { stage = 4 }
-            }
-          } label: {
-            Label("Approve & start", systemImage: "checkmark")
-          }
-          .buttonStyle(.primary)
-          .disabled(reviewed?.eligible != true || !store.online)
-          Button("Close") { store.review = nil }.buttonStyle(.quiet)
-        }
+        .frame(maxWidth: 560, alignment: .leading)
       }
-      .padding(Space.s6)
-      .background(GlassSurface(radius: 20))
-      .disabled(busy)
-      Text("Nothing is copied until you approve. Every file is read back and checked on landing.")
-        .font(.inter(TypeScale.xs)).foregroundStyle(Palette.ink4)
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.horizontal, Space.s2)
+    }
+    .padding(Space.s6)
+    .background(GlassSurface(radius: 22))
+    .disabled(busy)
+  }
+
+  private func fact(_ name: String, _ value: String, mono: Bool = false) -> some View {
+    HStack(alignment: .firstTextBaseline, spacing: Space.s4) {
+      Text(name).font(.inter(TypeScale.xs)).foregroundStyle(Palette.ink3).frame(width: 96, alignment: .leading)
+      Text(value).font(mono ? .mono(11.5) : .inter(TypeScale.xs, .medium)).foregroundStyle(Palette.ink1)
+        .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
     }
   }
 
-  private func fact(_ name: String, _ value: String, mono: Bool) -> some View {
-    HStack(alignment: .firstTextBaseline) {
-      Text(name).font(.inter(TypeScale.xs)).foregroundStyle(Palette.ink3)
-      Spacer(minLength: Space.s3)
-      Text(value).font(mono ? .mono(11.5) : .inter(TypeScale.xs, .medium)).foregroundStyle(Palette.ink1)
-        .lineLimit(1).truncationMode(.middle).textSelection(.enabled).help(value)
+  // MARK: The tree
+
+  private var tree: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(alignment: .center, spacing: Space.s3) {
+        SectionTitle("What lands where")
+        if plan["destinations"].rows.count > 1 {
+          GlassMenu(title: current["label"].text, size: .small) {
+            ForEach(plan["destinations"].rows, id: \.self) { d in
+              Button(d["label"].text) { selected = d["id"].text }
+            }
+          }
+        }
+      }
+      .padding(.bottom, Space.s3)
+      Hairline(color: Palette.rule2)
+      PlanBranch(
+        store: store, planID: plan["plan_id"], destination: destination,
+        editRole: { node in
+          sourceLabel = String(node["before"].text.split(separator: ":", maxSplits: 1).first ?? "")
+          role = ""
+          editingRole = true
+        }, exclude: exclude
+      )
+      .id(destination)
     }
   }
 

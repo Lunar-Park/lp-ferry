@@ -5,12 +5,14 @@ import UserNotifications
 
 @main struct FerryApp: App {
   @State private var store: Store
+  @State private var chrome: Chrome
   init() {
     if let url = Bundle.main.url(forResource: "Inter", withExtension: "woff2") {
       CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
     }
     let store = Store()
     _store = State(initialValue: store)
+    _chrome = State(initialValue: Chrome())
     store.onApproval = { event in
       guard !NSApp.isActive else { return }
       let content = UNMutableNotificationContent()
@@ -23,7 +25,7 @@ import UserNotifications
   }
   var body: some Scene {
     Window("File Ferry", id: "main") {
-      Host(store: store).ignoresSafeArea(.container, edges: .top).frame(
+      Host(store: store, chrome: chrome).ignoresSafeArea(.container, edges: .top).frame(
         minWidth: 800, minHeight: 560
       )
       .task {
@@ -62,10 +64,11 @@ struct MenuStatus: View {
 }
 struct Host: NSViewRepresentable {
   let store: Store
+  let chrome: Chrome
   func makeNSView(context: Context) -> NSHostingView<MainShell> {
-    let host = FirstMouseHostingView(rootView: MainShell(store: store))
+    let host = FirstMouseHostingView(rootView: MainShell(store: store, chrome: chrome))
     if let directory = Snapshots.directory {
-      Task { await Snapshots.capture(host, store: store, into: directory) }
+      Task { await Snapshots.capture(host, store: store, chrome: chrome, into: directory) }
     }
     return host
   }

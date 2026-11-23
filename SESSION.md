@@ -37,7 +37,7 @@ so. The Python/Electron code stays untouched until Phase 5. Tag
   - Remote verify prints the local readback mode.
   - Resume offsets aren't recorded in the receipt.
   - A pull whose source vanishes past failover deletes its kept temp, so later resumes start from zero.
-- **Ferry.app visual layer rebuilt on the Lunar Park style kit (2026-11-23):** D rejected `4da85e5` as a flat web dashboard. Park's Metal room/glass, `ParkButtonStyle`, `parkField`, rail discs and head band are ported into `app/Sources/Ferry/Design/` (standalone, no `../park` dependency) and retuned to Ferry's navy and ferry blue; FerryCore, IPC, bundling and tests are unchanged. Screens in `dist/screens/` (1160×790) and `dist/screens-compact/` (800) are captured with the real shader via `RoomRenderer.snapshot`. Waiting on D's review.
+- **Ferry.app visual layer on the Lunar Park style kit (2026-11-23):** Park's Metal room/glass, buttons and rail are ported into `app/Sources/Ferry/Design/` (standalone) in Ferry's navy and ferry blue (`e475c24`). D then asked for fewer screens and less glass: the app is now three places (Transfer home with a From → To card and a two-stage flow, Activity with route titles, Devices), no corner discs, and glass only on focal containers and the one primary button. Screens: `dist/screens/` (1160×790) and `dist/screens-compact/` (800). Waiting on D's review.
 - **Not done, waiting on D:**
   - merge #248
   - update `main` branch protection to `go (ubuntu-latest)`, `go (macos-latest)`, `park plugin`
@@ -55,7 +55,7 @@ so. The Python/Electron code stays untouched until Phase 5. Tag
 - `internal/p2p`: identity, pairing, grants, Path Radar, HTTP/2 handlers, pull/push, mDNS, plus the adapter implementing the planner and engine `Remote` interfaces. Tests: `p2p_test.go` (T3.x).
 - `internal/daemon`: service wiring, every RPC method, event bus, drive watcher. `internal/ipc`: socket JSON-RPC. `internal/mcp`: 12-tool stdio server. `internal/policy`: agent rules. Tests: `daemon_test.go` (T4.x), `cmd/ferry/cli_test.go`.
 - `park_plugins/ferry`: `engine.py` (daemon client), `ops.py`/`jobs.py` (Park contract). Tests in `tests/park_plugin` need Park: `PYTHONPATH=../park:. ../park/.venv/bin/python -m pytest tests/park_plugin`.
-- `app/Sources/Ferry/Design/`: the ported style kit (`FerryRoomShader`, `Glass`, `Buttons`, `Shell`, `Components`). Screenshots: `FERRY_FIXTURE=1 FERRY_SNAPSHOT_DIR=$PWD/dist/screens dist/Ferry.app/Contents/MacOS/Ferry` (add `FERRY_SNAPSHOT_WIDTH=800` for compact).
+- `app/Sources/Ferry/Routes.swift`: human transfer titles from `plan.get` + `plan.entries`. `app/Sources/Ferry/Design/`: the ported style kit (`FerryRoomShader`, `Glass`, `Buttons`, `Shell`, `Components`). Screenshots: `FERRY_FIXTURE=1 FERRY_SNAPSHOT_DIR=$PWD/dist/screens dist/Ferry.app/Contents/MacOS/Ferry` (add `FERRY_SNAPSHOT_WIDTH=800` for compact).
 - Gate: `make vet lint race cross`, plus `ruff check/format park_plugins tests`.
 
 ## Decisions
@@ -79,6 +79,7 @@ so. The Python/Electron code stays untouched until Phase 5. Tag
 - IPC is newline-delimited JSON-RPC 2.0 on a 0600 socket in a 0700 directory, with a same-uid peer-credential check. Params reject unknown fields. Event delivery is best-effort per subscriber and never stalls a transfer.
 - Agents act as `agent:<name>`. Over-policy requests (unsaved destination, over `auto_approve_max_bytes`, or saved-destination auto-approve off) park the plan in `awaiting_approval`. A human `plan.approve` starts it under the agent's name, and agents cannot approve. Actor strings are attribution plus a policy hook, not authentication against same-user code.
 - MCP is a lean in-repo stdio implementation (no SDK dependency), with 12 tools all marked `destructiveHint: false`. Nothing anywhere deletes, moves or overwrites.
+- Ferry's app is three places, not five: Transfer is home. Dashboard's content lives in Transfer's live banner, Machines and Presets merge into Devices, and the five-step wizard became Set up → Review & copy.
 - Ferry's app copies the Lunar Park style kit rather than depending on Park, so the open-source repo builds alone. The one shader change is a per-pane visible band (`GlassScroll`), so glass scrolled under the head stops bending the room; it clips vertically only, so pane shadows still reach into the gutter.
 - The final `transfer.state` is emitted after the receipt export, so a client reacting to it can open the receipt.
 - Drive hot-plug is a 3 s mount-list poll that emits `drive.mounted` / `drive.unmounted`. There are no FSEvents/udev hooks yet.

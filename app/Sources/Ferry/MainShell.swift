@@ -1,15 +1,15 @@
 import FerryCore
 import SwiftUI
 
-/// The window: the living room under everything, the rail of glass discs on the traffic
-/// lights' axis, the page beside it under one open head band, and the corner discs.
+/// The window: the living room under everything, the rail of three glass discs on the
+/// traffic lights' axis, and the page beside it under one open head band.
 struct MainShell: View {
   @Bindable var store: Store
-  @State private var chrome = Chrome()
+  @Bindable var chrome: Chrome
 
   var body: some View {
     AmbientRoom {
-      ZStack(alignment: .topTrailing) {
+      ZStack(alignment: .topLeading) {
         Ground()
         HStack(spacing: 0) {
           Rail(store: store, chrome: chrome)
@@ -17,13 +17,12 @@ struct MainShell: View {
             .padding(.leading, Page.gutter)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        Floaters(store: store, chrome: chrome)
-          .padding(.top, Floaters.top)
-          .padding(.trailing, Page.gutter)
       }
     }
     .background(WindowChrome())
     .ignoresSafeArea()
+    .environment(\.ferryStore, store)
+    .environment(\.chrome, chrome)
     .foregroundStyle(Palette.ink1)
     .font(.inter(TypeScale.base))
     .tint(Palette.accent)
@@ -41,17 +40,15 @@ struct MainShell: View {
   }
 
   @ViewBuilder private var page: some View {
-    switch Place(rawValue: store.section) ?? .dashboard {
-    case .dashboard: Dashboard(store: store, chrome: chrome)
+    switch Place(rawValue: store.section) ?? .transfer {
     case .transfer:
       if let plan = store.review {
-        PlanReview(store: store, plan: plan).id(plan["plan_id"])
+        PlanReview(store: store, chrome: chrome, plan: plan).id(plan["plan_id"])
       } else {
-        Workspace(store: store)
+        TransferPage(store: store, chrome: chrome)
       }
     case .activity: Activity(store: store, chrome: chrome)
-    case .machines: Machines(store: store)
-    case .presets: Library(store: store)
+    case .devices: Devices(store: store, chrome: chrome)
     }
   }
 }

@@ -1,17 +1,16 @@
 import SwiftUI
 
-// The buttons, one system for every view, ported from the Lunar Park style kit
-// (park/apple/Sources/ParkNative/Buttons.swift). A button is a control, not a cell: its plate
-// is the room's glass at a control's size (`GlassSurface`, as the rail's discs are), light
-// and small, and only on the few buttons that need one.
+// The buttons, one system for every view, after the Lunar Park style kit
+// (park/apple/Sources/ParkNative/Buttons.swift). Ferry spends the room's glass sparingly:
+// only the one primary action of a screen is a glass plate; the rest are flat.
 //
-//   primary      the one action of a view: the glass tinted ferry blue, its edge lit blue,
-//                its words ice blue (Build plan, Approve & start, Pair machine)
-//   standard     clear glass: faint fill, lit top edge, the room's soft shadow (Plan
-//                offload, Send, Close review)
-//   quiet        words or an icon, no plate; a faint wash under the pointer (Export,
-//                Dismiss, a row's small actions)
-//   destructive  the glass tinted coral, its words coral (Cancel transfer)
+//   primary      the one action of a screen, and the only button made of the room's glass:
+//                tinted ferry blue, its edge lit blue, its words ice blue (Review transfer,
+//                Start verified copy, Verify on disk)
+//   standard     a flat plate: a soft fill and a faint lit top edge (Pair machine, Edit)
+//   quiet        words or an icon, no plate; a faint wash under the pointer (Offload,
+//                Check speeds, a row's small actions)
+//   destructive  a flat coral plate, its words coral (Cancel)
 //
 // Shape: a pill, its radius half its height; an icon alone is a disc. Heights: 32 (`regular`)
 // and 26 (`small`, inside rows and cards); words 14, medium (semibold on the primary). Pressed
@@ -74,14 +73,6 @@ private struct ParkButtonBody: View {
     }
   }
 
-  private var tint: Color? {
-    switch kind {
-    case .primary: return Palette.accent
-    case .destructive: return Palette.bad
-    default: return nil
-    }
-  }
-
   var body: some View {
     let height = size.height
     configuration.label
@@ -112,21 +103,34 @@ private struct ParkButtonBody: View {
     switch kind {
     case .quiet:
       shape.fill(Color.white.opacity(lit ? 0.06 : 0))
-    default:
+    case .primary:
+      // The one action of a screen is the one button made of the room's glass.
       ZStack {
         GlassSurface(
           radius: height / 2, style: lit ? GlassStyle(smoke: 0, sheen: 1.8) : .control,
-          tint: enabled ? tint : nil)
-        if let tint, enabled {
-          // The tinted kinds' edge, lit in their colour along the top.
+          tint: enabled ? Palette.accent : nil)
+        if enabled {
           shape.strokeBorder(
             LinearGradient(
-              colors: [tint.opacity(lit ? 0.62 : 0.48), tint.opacity(0.10)],
+              colors: [Palette.accent.opacity(lit ? 0.70 : 0.55), Palette.accent.opacity(0.12)],
               startPoint: .top, endPoint: .bottom), lineWidth: 1)
         }
         if pressed { shape.fill(Color.black.opacity(0.12)) }
       }
       .opacity(enabled ? 1 : 0.45)
+    case .standard, .destructive:
+      // Everything else is a flat, crisp plate: a soft fill and a faint lit top edge, so it
+      // never competes with the primary.
+      let base = kind == .destructive ? Palette.bad : Color.white
+      let fill = kind == .destructive ? (lit ? 0.20 : 0.13) : (lit ? 0.12 : 0.075)
+      ZStack {
+        shape.fill(base.opacity(pressed ? fill * 0.7 : fill))
+        shape.strokeBorder(
+          LinearGradient(
+            colors: [Color.white.opacity(lit ? 0.14 : 0.09), Color.white.opacity(0.0)],
+            startPoint: .top, endPoint: .center), lineWidth: 1)
+      }
+      .opacity(enabled ? 1 : 0.5)
     }
   }
 }

@@ -138,7 +138,7 @@ struct Segments: View {
             .foregroundStyle(on ? Palette.bone : hovered == item ? Palette.ink1 : Palette.ink3)
             .padding(.horizontal, 14).frame(height: Head.control - 6)
             .background {
-              if on { GlassSurface(radius: (Head.control - 6) / 2, style: GlassStyle(smoke: 0, sheen: 1.8)) }
+              if on { Capsule().fill(Color.white.opacity(0.13)) }
             }
             .contentShape(Capsule())
         }
@@ -152,7 +152,7 @@ struct Segments: View {
   }
 }
 
-/// A menu as a glass pill: its value and a small chevron. Never the grey system pop-up.
+/// A menu as a flat pill: its value and a small chevron. Never the grey system pop-up.
 struct GlassMenu<Items: View>: View {
   let title: String
   var icon: String? = nil
@@ -184,11 +184,13 @@ struct GlassMenu<Items: View>: View {
         .allowsHitTesting(false)
     }
     .background {
-      GlassSurface(
-        radius: size.height / 2, style: hovering ? GlassStyle(smoke: 0, sheen: 1.8) : .control)
+      Capsule().fill(Color.white.opacity(hovering ? 0.12 : 0.075))
+        .overlay(
+          Capsule().strokeBorder(
+            LinearGradient(colors: [.white.opacity(0.09), .clear], startPoint: .top, endPoint: .center),
+            lineWidth: 1))
     }
     .contentShape(Capsule())
-    .offset(y: hovering ? -1 : 0)
     .animation(.spring(response: 0.25, dampingFraction: 0.7), value: hovering)
     .onHover { hovering = $0 }
   }
@@ -239,11 +241,22 @@ struct StatusPill: View {
     }
   }
 
+  /// The status in plain words.
+  static func words(_ word: String) -> String {
+    switch word.lowercased() {
+    case "partial": "Partly copied"
+    case "needs_attention": "Needs attention"
+    case "running": "Copying"
+    case "completed": "Completed"
+    default: word.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+  }
+
   var body: some View {
     let (color, symbol) = Self.style(word)
     HStack(spacing: 5) {
       Image(systemName: symbol).font(.system(size: 9, weight: .bold))
-      Text(word.replacingOccurrences(of: "_", with: " ").capitalized)
+      Text(Self.words(word))
     }
     .font(.inter(TypeScale.xs, .semibold)).lineLimit(1).fixedSize()
     .foregroundStyle(color)
@@ -252,7 +265,8 @@ struct StatusPill: View {
   }
 }
 
-/// How bytes reach a place: a quiet tag with its own small glyph.
+/// How bytes reach a place: plain quiet words with their own small glyph, no plate, so it
+/// never reads as a button.
 struct TransportBadge: View {
   let text: String
 
@@ -264,24 +278,23 @@ struct TransportBadge: View {
         ? "globe" : word.contains("LAN") ? "cable.connector" : word.contains("Network") ? "network" : "bolt"
     HStack(spacing: 5) {
       Image(systemName: symbol).font(.system(size: 10, weight: .medium)).foregroundStyle(Palette.accent)
-      Text(word).foregroundStyle(Palette.ink2)
+      Text(word).foregroundStyle(Palette.ink3)
     }
     .font(.inter(TypeScale.xs, .medium)).lineLimit(1).fixedSize()
-    .padding(.horizontal, 9).frame(height: 22)
-    .background(Capsule().fill(Color.white.opacity(0.06)))
   }
 }
 
-/// A thing's icon on the open room: a small glass disc with a line glyph in ferry blue.
+/// A thing's icon: a line glyph in ferry blue on a faint flat disc.
 struct IconDisc: View {
   let symbol: String
   var size: CGFloat = 36
+  var color = Palette.accent
 
   var body: some View {
-    Image(systemName: symbol).font(.system(size: size * 0.4, weight: .regular))
-      .foregroundStyle(Palette.accent)
+    Image(systemName: symbol).font(.system(size: size * 0.42, weight: .regular))
+      .foregroundStyle(color)
       .frame(width: size, height: size)
-      .background(GlassSurface(radius: size / 2, style: .control))
+      .background(Circle().fill(Color.white.opacity(0.055)))
   }
 }
 
