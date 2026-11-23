@@ -174,9 +174,22 @@ func (n *Node) AdvertisedEndpoints() []Endpoint {
 			out = append(out, LocalEndpoints(port)...)
 			continue
 		}
-		out = append(out, Endpoint{Addr: a, Tier: TierFor(ip, ""), Badge: badgeFor(TierFor(ip, ""))})
+		out = append(out, endpointFor(a, ip, port))
 	}
 	return out
+}
+
+// endpointFor classifies one bound address the way LocalEndpoints would,
+// so a listener named by address keeps its interface's tier (Wi-Fi,
+// Tailscale, 10GbE) instead of a guess from the IP alone.
+func endpointFor(addr string, ip net.IP, port string) Endpoint {
+	for _, e := range LocalEndpoints(port) {
+		if e.Addr == addr {
+			return e
+		}
+	}
+	t := TierFor(ip, "")
+	return Endpoint{Addr: addr, Tier: t, Badge: badgeFor(t)}
 }
 
 // ---------------------------------------------------------------------

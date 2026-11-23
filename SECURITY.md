@@ -35,8 +35,9 @@ daemon also checks that the connecting process belongs to the same OS user. Anyt
 that user can drive Ferry. The `actor` a client declares (`human` or `agent:<name>`) is
 attribution and a policy hook, not authentication between processes of the same user.
 
-**The P2P listener** (default `:9410`; `ferry daemon --no-p2p` turns it off) speaks only mutual
-TLS 1.3, with no certificate authority:
+**The P2P listener** (default `:9410` on every interface, IPv4 and IPv6; `ferry daemon --listen
+ADDR`, repeatable, binds only the named addresses, and `--no-p2p` turns it off) speaks only
+mutual TLS 1.3, with no certificate authority:
 
 - **Unpaired keys are refused at the handshake.** A connection completes only if both sides'
   Ed25519 keys are pinned, and that is re-checked on every connection: session resumption is

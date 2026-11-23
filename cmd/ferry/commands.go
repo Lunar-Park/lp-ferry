@@ -53,7 +53,7 @@ func sdNotify(state string) {
 }
 
 func daemonCmd(g *globalFlags) *cobra.Command {
-	var listen string
+	var listen []string
 	var noP2P, noMDNS bool
 	cmd := &cobra.Command{Use: "daemon", Short: "Run the Ferry engine (socket IPC, P2P listener, transfers)", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -63,10 +63,10 @@ func daemonCmd(g *globalFlags) *cobra.Command {
 			}
 			opts := daemon.Options{Config: cfg, Paths: paths, Version: version, MDNS: !noMDNS}
 			if !noP2P {
-				if listen == "" {
-					listen = ":" + strconv.Itoa(cfg.Daemon.ListenPort)
+				if len(listen) == 0 {
+					listen = []string{":" + strconv.Itoa(cfg.Daemon.ListenPort)}
 				}
-				opts.P2PAddrs = []string{listen}
+				opts.P2PAddrs = listen
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -86,7 +86,8 @@ func daemonCmd(g *globalFlags) *cobra.Command {
 			d.Close()
 			return err
 		}}
-	cmd.Flags().StringVar(&listen, "listen", "", "P2P listen address (default :<daemon.listen_port>)")
+	cmd.Flags().StringArrayVar(&listen, "listen", nil,
+		"P2P listen address, repeatable (default :<daemon.listen_port>, every interface; name addresses to keep it off the others)")
 	cmd.Flags().BoolVar(&noP2P, "no-p2p", false, "disable the P2P listener")
 	cmd.Flags().BoolVar(&noMDNS, "no-mdns", false, "do not advertise over mDNS")
 	return cmd

@@ -515,3 +515,47 @@ func TestEnginePullAndRemoteLand(t *testing.T) {
 		}
 	}
 }
+
+// A daemon bound to named addresses (ferry daemon --listen A --listen B)
+// advertises each of them, and Path Radar falls back to the other when one
+// stops answering.
+func TestNamedListenersAreEachAdvertisedAndFailOver(t *testing.T) {
+	a := newNode(t, "a")
+	b := newNode(t, "b")
+	if err := b.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	eps := b.AdvertisedEndpoints()
+	if len(eps) != 2 || eps[0].Addr == eps[1].Addr {
+		t.Fatalf("advertised %v, want both bound addresses", eps)
+	}
+	for _, e := range eps {
+		if e.Tier != TierLAN {
+			t.Fatalf("loopback endpoint %v: tier %d, want LAN", e.Addr, e.Tier)
+		}
+	}
+	pair(t, a, b)
+	ctx := context.Background()
+	c, err := a.Client(ctx, b.Identity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Info(ctx); err != nil {
+		t.Fatal(err)
+	}
+	active, _ := c.Radar.Active()
+	b.mu.Lock()
+	for _, ln := range b.lns {
+		if ln.Addr().String() == active.Addr {
+			_ = ln.Close()
+		}
+	}
+	b.mu.Unlock()
+	c.tr.CloseIdleConnections()
+	if _, err := c.Info(ctx); err != nil {
+		t.Fatalf("after closing %s: %v", active.Addr, err)
+	}
+	if now, _ := c.Radar.Active(); now.Addr == active.Addr {
+		t.Fatalf("still on the closed listener %s", now.Addr)
+	}
+}
