@@ -101,8 +101,8 @@ def _finish(
 ) -> dict:
     """Turn the engine's receipt into Park's: register every landed file with Park, keep
     only what both hashes agree on as verified, and close the transfer."""
-    from park.node.client import NodeError
     from park.ops import ParkError
+    from park.sdk.node import NodeError
 
     files: list[dict] = []
     written = 0
@@ -219,8 +219,8 @@ def _execute(
     errors: list[str] = []
 
     def on_progress(p: dict) -> None:
-        from park.node.client import NodeError
         from park.ops import ParkError
+        from park.sdk.node import NodeError
 
         fraction = float(p.get("overall_fraction") or 0)
         step = int(fraction * PROGRESS_STEPS)
@@ -316,8 +316,8 @@ def copy(job: JobContext) -> dict:
 
 def _fail_send(job: JobContext, transfer: str, errors: list[str]) -> dict:
     """End a send that never got as far as a plan, so the transfer says why instead of waiting."""
-    from park.node.client import NodeError
     from park.ops import ParkError
+    from park.sdk.node import NodeError
 
     try:
         job.call("ferry.send.fail", {"transfer": transfer, "errors": errors})

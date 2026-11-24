@@ -24,7 +24,9 @@ def test_manifest_loads_and_declares_what_the_plugin_builds():
     assert manifest.package == "park_plugins.ferry"
     assert manifest.satisfies_park("0.1.0")
     assert [job.name for job in manifest.jobs] == ["copy", "send", "proxy", "resolve"]
-    assert not manifest.views
+    assert [(view.id, view.place, view.entry) for view in manifest.views] == [
+        ("ingest", "library", "views/ingest.js")
+    ]
     assert "ingest" in manifest.summary.lower()
 
 

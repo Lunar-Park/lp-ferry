@@ -1,9 +1,30 @@
 id = "ferry"
 name = "File Ferry"
-version = "0.2.0"
-park = ">=0.1"
+version = "0.4.0"
+park = ">=0.1,<0.2"
 summary = "Ingest through the ferry engine: card offloads, machine-to-machine sends, receipts, proxies and Resolve projects."
 modules = ["park_plugins.ferry.records", "park_plugins.ferry.ops"]
+
+[app]
+title = "File Ferry"
+description = "Ingest, transfers and proxies"
+category = "Media"
+icon = "folder"
+tint = "amber"
+source = "https://github.com/Lunar-Park/lp-ferry"
+
+[app.standalone]
+name = "Ferry"
+bundle_id = "dev.lunarpark.ferry"
+
+[[views]]
+id = "ingest"
+title = "Ferry"
+entry = "views/ingest.js"
+place = "library"
+scoped = true
+requires = ["ferry.ingest.list", "ferry.plan"]
+hint = "bring media in: cards, proxies and transfers"
 
 [[calls]]
 name = "plan"
