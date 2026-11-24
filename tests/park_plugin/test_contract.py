@@ -10,7 +10,9 @@ from pathlib import Path
 import pytest
 
 park = pytest.importorskip("park", reason="park is not installed")
-contract = pytest.importorskip("park.plugins.contract", reason="park plugin contract is not installed")
+contract = pytest.importorskip(
+    "park.plugins.contract", reason="park plugin contract is not installed"
+)
 
 REPO = Path(__file__).resolve().parents[2]
 PACKAGE = REPO / "park_plugins" / "ferry"
@@ -18,7 +20,9 @@ PARK_KIT = Path(park.__file__).resolve().parents[1] / "tests/app/workspaces/view
 NODE = shutil.which("node")
 
 needs_node = pytest.mark.skipif(NODE is None, reason="node is not on PATH")
-needs_kit = pytest.mark.skipif(not PARK_KIT.is_file(), reason="park is installed without its test kit")
+needs_kit = pytest.mark.skipif(
+    not PARK_KIT.is_file(), reason="park is installed without its test kit"
+)
 
 
 def test_ferry_meets_every_rule_of_the_contract():
@@ -30,7 +34,9 @@ def test_ferry_meets_every_rule_of_the_contract():
 def test_ingest_screen_keeps_nothing_about_a_mount_at_module_level():
     """Served from the plugin: it imports nothing by path and builds itself from api.kit per mount."""
     source = (PACKAGE / "views" / "ingest.js").read_text(encoding="utf-8")
-    assert "\nimport " not in "\n" + source and "import(" not in source and "import.meta" not in source
+    assert (
+        "\nimport " not in "\n" + source and "import(" not in source and "import.meta" not in source
+    )
     assert "api?.kit" in source and "function screen(kit)" in source
     assert [line for line in source.splitlines() if line.startswith(("let ", "var "))] == []
 
@@ -61,7 +67,7 @@ def test_ingest_screen_refuses_a_park_without_api_kit():
     const dom = await import({PARK_KIT.as_uri()!r});
     dom.install();
     const kit = await dom.kit();
-    const view = await import({(PACKAGE / 'views/ingest.js').as_uri()!r});
+    const view = await import({(PACKAGE / "views/ingest.js").as_uri()!r});
     const said = [];
     for (const api of [undefined, {{}}, {{ kit: {{ dom: kit.dom }} }}]) {{
       try {{ view.mount(new dom.Element("div"), api); said.push("mounted"); }}
