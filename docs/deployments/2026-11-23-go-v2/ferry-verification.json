@@ -1,0 +1,164 @@
+[
+  {
+    "host": "laptop",
+    "returncode": 0,
+    "data": {
+      "path": "/Users/dspury/.local/bin/ferry",
+      "version": "ferry 282dee7 (go1.27.4 darwin/arm64)",
+      "sha256": "b80247f40882687213c56924abf7127837b0686902562e371deffc1909d203b8",
+      "doctor": 0,
+      "checks": 25,
+      "status": {
+        "active_transfers": [],
+        "awaiting_approval": [],
+        "events_dropped": 0,
+        "name": "demitriuss-MBP.lan",
+        "p2p_addrs": [
+          "[::]:9410"
+        ],
+        "peer_id": "fry_e2f5ede28cd9313e",
+        "protocol": 1,
+        "socket": "/Users/dspury/.ferry/ferry.sock",
+        "uptime_seconds": 155,
+        "version": "282dee7"
+      },
+      "legacy_remaining": [],
+      "managed_running": true
+    }
+  },
+  {
+    "host": "lunar01",
+    "returncode": 0,
+    "data": {
+      "path": "/opt/homebrew/bin/ferry",
+      "version": "ferry 282dee7 (go1.27.4 darwin/arm64)",
+      "sha256": "b80247f40882687213c56924abf7127837b0686902562e371deffc1909d203b8",
+      "doctor": 0,
+      "checks": 22,
+      "status": {
+        "active_transfers": [],
+        "awaiting_approval": [],
+        "events_dropped": 0,
+        "name": "Mac.lan",
+        "p2p_addrs": [
+          "[::]:9410"
+        ],
+        "peer_id": "fry_783846726387844d",
+        "protocol": 1,
+        "socket": "/Users/selene/.ferry/ferry.sock",
+        "uptime_seconds": 126,
+        "version": "282dee7"
+      },
+      "legacy_remaining": [],
+      "managed_running": true
+    }
+  },
+  {
+    "host": "lunar02",
+    "returncode": 0,
+    "data": {
+      "path": "/Users/llms04/bin/ferry",
+      "version": "ferry 282dee7 (go1.27.4 darwin/arm64)",
+      "sha256": "b80247f40882687213c56924abf7127837b0686902562e371deffc1909d203b8",
+      "doctor": 0,
+      "checks": 17,
+      "status": {
+        "active_transfers": [],
+        "awaiting_approval": [],
+        "events_dropped": 0,
+        "name": "Mac-5881.lan",
+        "p2p_addrs": [
+          "[::]:9410"
+        ],
+        "peer_id": "fry_a2093d3f763d23fb",
+        "protocol": 1,
+        "socket": "/Users/llms04/.ferry/ferry.sock",
+        "uptime_seconds": 125,
+        "version": "282dee7"
+      },
+      "legacy_remaining": [],
+      "managed_running": true
+    }
+  },
+  {
+    "host": "titus",
+    "returncode": 0,
+    "data": {
+      "path": "/home/dmtri/.local/bin/ferry",
+      "version": "ferry 282dee7 (go1.27.4 linux/amd64)",
+      "sha256": "18ed48a47ba8994b25185c374f78c2f2217b63328d413862050ba78babb25ea3",
+      "doctor": 0,
+      "checks": 20,
+      "status": {
+        "active_transfers": [],
+        "awaiting_approval": [],
+        "events_dropped": 0,
+        "name": "Titus",
+        "p2p_addrs": [
+          "[::]:9410"
+        ],
+        "peer_id": "fry_bac6b005cee55da9",
+        "protocol": 1,
+        "socket": "/home/dmtri/.ferry/ferry.sock",
+        "uptime_seconds": 127,
+        "version": "282dee7"
+      },
+      "legacy_remaining": [],
+      "managed_running": true
+    }
+  },
+  {
+    "host": "kes",
+    "returncode": 0,
+    "data": {
+      "path": "/home/dmtri/.local/bin/ferry",
+      "version": "ferry 282dee7 (go1.27.4 linux/arm64)",
+      "sha256": "dfb99936bade536dcaf971d34b982d0abf58086686a755f558cf53ce0241d8f7",
+      "doctor": 0,
+      "checks": 14,
+      "status": {
+        "active_transfers": [],
+        "awaiting_approval": [],
+        "events_dropped": 0,
+        "name": "kes",
+        "p2p_addrs": [
+          "[::]:9410"
+        ],
+        "peer_id": "fry_249f74004ff0dd86",
+        "protocol": 1,
+        "socket": "/home/dmtri/.ferry/ferry.sock",
+        "uptime_seconds": 127,
+        "version": "282dee7"
+      },
+      "legacy_remaining": [],
+      "managed_running": true
+    }
+  },
+  {
+    "host": "mackbox",
+    "returncode": 0,
+    "data": {
+      "path": "/home/mack/.local/bin/ferry",
+      "version": "ferry 282dee7 (go1.27.4 linux/amd64)",
+      "sha256": "18ed48a47ba8994b25185c374f78c2f2217b63328d413862050ba78babb25ea3",
+      "doctor": 0,
+      "checks": 13,
+      "status": {
+        "active_transfers": [],
+        "awaiting_approval": [],
+        "events_dropped": 0,
+        "name": "mackbox",
+        "p2p_addrs": [
+          "[::]:9410"
+        ],
+        "peer_id": "fry_51bc336c065d90ce",
+        "protocol": 1,
+        "socket": "/home/mack/.ferry/ferry.sock",
+        "uptime_seconds": 121,
+        "version": "282dee7"
+      },
+      "legacy_remaining": [],
+      "managed_running": true
+    }
+  }
+]

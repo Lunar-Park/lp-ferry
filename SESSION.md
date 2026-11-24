@@ -1,5 +1,10 @@
 # Ferry — working note
 
+## Deployment · 23 November 2026
+
+Go v2 `282dee7` deployed to laptop, lunar01, lunar02, titus, kes and mackbox; all managed daemons running and doctor passing. Native Ferry.app installed/launched on laptop; deployed laptop Park adapter upgraded and verified. Legacy v0.3 databases backed up, CLI installs removed. No push/merge/protection changes. Fleet exceptions, Park launcher bundle-ID mismatch and verification evidence: [deployment report](docs/deployments/2026-11-23-go-v2/REPORT.md). Skipped hosts still need deployment; peer roots/pairing remain unconfigured.
+
+
 ## Intent
 
 Rebuild Ferry's backend as a single Go binary, following
