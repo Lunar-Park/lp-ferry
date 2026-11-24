@@ -36,3 +36,9 @@ htmlcov/
 # Demo pipeline output — regenerated on each run
 examples/test-dataset/output/
 .p2-stash/
+
+# Go build output
+/bin/
+
+/app/.build/
+/app/.swiftpm/

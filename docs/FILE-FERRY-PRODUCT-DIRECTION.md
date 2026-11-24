@@ -1,5 +1,7 @@
 # File Ferry Product Direction — Local Media Intake Workstation
 
+> **Historical.** This describes the Python/Electron app retired in Ferry v2; that code is preserved at the `legacy-python-v0.3` tag. Ferry is now the Go binary — see [GO-QUICKSTART.md](GO-QUICKSTART.md).
+
 > **Status:** Draft for discussion
 > **Date:** 2026-08-11
 > **Scope:** Product and architecture direction after v0.2.4; no application

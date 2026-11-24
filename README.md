@@ -1,386 +1,77 @@
-# file-ferry
+# ferry
 
-Park integration: this repository provides ingest, transfers, proxies and Resolve tooling. Park owns the integrated
-workspace in `park/app/workspaces/ferry/`; the plugin ships operations, data and adapters,
-without another copy of the Park UI. Existing standalone tools remain available where
-needed. Reusable skills are maintained in LP Skills.
-
-For Park offloads, `ferry.plan` takes a `machine` that can see both existing source and
-destination folders, plus an optional Park `project`. Planning runs there, and `ferry.offload`
-queues that same worker. Older unowned plans remain readable but must be replanned before
-using the shared queue. This does not change the standalone CLI/TUI below.
-
-Worker-owned plans support `skip` and `rename`, and reject `on_conflict = "overwrite"`.
-Existing files are hashed and accepted only when they match; a newly appearing destination
-is never replaced. Verified staging uses atomic hard-link publication, so destinations
-without hard-link support fail explicitly and need separate qualification. Source/destination
-mount identity is checked again before copying. Cancellation or a node RPC failure preserves
-previously verified work in a partial receipt when the hub can acknowledge it.
-
-For project-bound plans, verified media is filed as project sources after the copy receipt
-is saved. Filing failure leaves the verified copy intact. `ferry.receipt.file` (also Park's
-**Retry project filing**) repairs attachment from that receipt without copying again.
-
-`ferry.send` moves a folder from one machine's disk to another's directly — the hub introduces the
-two machines and keeps the receipt, no byte is staged in between — with every file hashed at both
-ends. It needs a file server on the source machine, which today accepts any valid node token over
-plain HTTP: enable it only on a network you control. [How it works, and what it does not
-guarantee yet](docs/MACHINE-TO-MACHINE-SEND.md) · [threat model](SECURITY.md#threat-model--read-this-before-you-enable-a-node-file-server).
-
-[![Version](https://img.shields.io/badge/version-0.2.4-blue)](https://github.com/Lunar-Park/lp-ferry)
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/Lunar-Park/lp-ferry/ci.yml?style=flat-square)](https://github.com/Lunar-Park/lp-ferry/actions/workflows/ci.yml)
 
-> A CLI + interactive TUI for the boring-but-critical infrastructure underneath video post-production: probe camera cards, organize them, generate proxies, spin up a DaVinci Resolve project, and verify backups — every step logged to a local SQLite audit trail.
+Verified, local-first file transport for people and agents. It moves a camera card to an SSD and a NAS at once, an SSD to another SSD, or a folder on one machine straight to another machine's disk. Every file is proven to have arrived byte for byte, and every transfer ends with a receipt you can re-check later.
 
-No API keys. No cloud. Just FFmpeg, your local SQLite, and (optionally) DaVinci Resolve.
+`ferry` is one static binary for Linux and macOS:
 
----
-
-## Two ways to use it
-
-**1. The interactive TUI** (the primary interface for most people)
-
-```bash
-ferry
+```text
+ferry daemon   the engine: disk I/O, transfers, machine-to-machine transport, ledger, local socket
+ferry <cmd>    the CLI (plan, approve, send, status, verify, peer, dest, preset, doctor, …)
+ferry mcp      an MCP server, so agents can plan and run transfers that show up live for you
 ```
 
-Launches a full-screen Textual workstation with four screens: **Home** (dashboard), **Pipelines** (browse + queue + watch runs live), **Audit Log** (browse and search run history), and **Settings** (edit and persist config). See [The TUI](#the-tui) below for the full keymap.
+## What it guarantees
 
-**2. The CLI** (for scripts, cron, and quick one-offs)
-
-```bash
-ferry run ./raw/ --organize --proxy --resolve-project --verify --project-name "Episode-12"
-```
-
-Chains probe → organize → proxy → resolve-project → verify in one call. Each command also runs standalone — see [The CLI](#the-cli).
-
-Prefer scripts and one-liners? Add `--no-tui` to skip the TUI auto-launch and stay in CLI mode:
-
-```bash
-ferry --no-tui run ./raw/
-```
-
----
+- **Copy only.** Ferry never deletes a source and never replaces an existing file. A name that is taken gets a deterministic `name (2).ext` or a skip proven by full checksum, never an overwrite.
+- **Verified on the disk, not in memory.** Each file is written to a job-owned temp file and fsynced. It is then read back from the drive with the page cache bypassed (`F_NOCACHE` on macOS, `FADV_DONTNEED` on Linux) and hash-compared. Only then is it published, with an atomic no-replace primitive probed for that destination.
+- **One reviewed plan, exactly.** Transfers start from an approved plan fingerprint. Changing the source, destination, preset or a camera role invalidates the approval.
+- **Fails closed.** Symlinks under a root, a share that unmounted behind its mount folder, unknown config keys, scan errors and stale approvals all stop the transfer loudly.
+- **Direct between machines.** Two machines pair once and pin each other's Ed25519 keys. After that every connection is mutual TLS 1.3, and the bytes travel the fastest direct path (direct link, LAN, Wi-Fi or Tailscale), with failover that resumes at the exact byte. There is no cloud, no relay, and nothing staged on a third machine.
+- **Receipts.** `ferry-receipt-v2` records every file's hashes, where it landed, how it was verified and published, and a tamper-evident digest. `ferry verify` re-proves a receipt at any time, with cron-friendly exit codes.
 
 ## Quick start
 
-```bash
-# 1. Get the code
-git clone https://github.com/Lunar-Park/lp-ferry.git
-cd lp-ferry
-
-# 2. Install (use pipx for an isolated install, or pip if you don't have it)
-pipx install .
-#   — or —
-pip install .
-
-# 3. Make sure ffmpeg is on PATH (required)
-brew install ffmpeg         # macOS
-sudo apt install ffmpeg     # Debian/Ubuntu
-
-# 4. Launch the TUI
-ferry
+```sh
+make build && install -m 0755 bin/ferry /usr/local/bin/ferry
+ferry daemon &                       # or install the launchd / systemd service
+ferry send /Volumes/CARD --to /Volumes/SSD/Ingest --to /Volumes/NAS/Ingest --yes
+ferry verify --transfer <transfer_id>
 ```
 
-Want to try it without your own media? Bundled sample footage is in [`examples/`](./examples/):
+[docs/GO-QUICKSTART.md](docs/GO-QUICKSTART.md) covers:
+- installation and the headless Linux service
+- configuration (`~/.ferry/ferry.toml`)
+- presets and camera roles
+- pairing two machines
+- connecting an agent (`claude mcp add ferry -- ferry mcp`)
 
-```bash
-cd examples/
-./run-demo.sh
-```
+## Organizing on the way in
 
-A full walkthrough with screenshots and audit-log output is in [`examples/WALKTHROUGH.md`](./examples/WALKTHROUGH.md).
+Presets route files as they land. The built-in presets are:
+- `preserve-source-structure`
+- `mirror-source`
+- `sort-by-category`
+- `camera-card-conform`
 
----
+For example, `{camera_role}/{capture_date}/{camera_role}_{filename}` files a Sony card bound as ACAM under `ACAM/2026-11-22/ACAM_C0001.MP4`, and its XML sidecar goes with it.
 
-## The TUI
+Capture dates and camera identity come from container headers, read in pure Go (MP4/MOV, EXIF, BWF/iXML, Sony XML), with no FFmpeg. A file with no capture date is routed to the fallback with a warning; Ferry never uses "today" in its place.
 
-The TUI is a full-screen Textual workstation. It's keyboard-driven and lives inside your terminal — no browser, no separate window.
+Every plan can be inspected before anything copies, as a paged before → after tree (`ferry_plan_tree` for agents, `plan.tree` over the socket).
 
-| Screen        | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Home**      | Dashboard with ffmpeg version, db path, and stat tiles (total / succeeded / failed / live runs)                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| **Pipelines** | Browse mounted folders, queue several sources, run all five capability steps, watch progress live. The MEDIA BROWSER pane surfaces connected external drives (camera cards, backup disks, USB sticks) at the top — each entry shows name and free/total space, click one to jump the tree straight to it. The drive list refreshes automatically when cards are plugged in or ejected, and system junk (`.Trashes`, `$RECYCLE.BIN`, AppleDouble `._*` sidecars, …) is hidden from the browser and skipped by every pipeline step. |
-| **Audit Log** | Browse and search run history; runs are color-coded by status                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| **Settings**  | Edit and persist proxy codec/height, checksum algorithm, and binary paths                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+## For apps and agents
 
-**Keybindings** (all available without leaving the keyboard):
+- **Apps:** the daemon speaks newline-delimited JSON-RPC 2.0 on a user-only Unix socket. Live `transfer.progress` events (every 150 ms, with an honest two-phase ETA) carry who started the transfer. The contract is [docs/IPC-PROTOCOL.md](docs/IPC-PROTOCOL.md); it's what the native macOS app binds to.
+- **Agents:** they get twelve MCP tools, none of which can delete, move or overwrite anything. Under `[agent_policy]`, a transfer to an unsaved destination or over a size limit waits for a human `ferry approve`.
+- **Park:** `park_plugins/ferry/` keeps Park's ingest workspace, records and project filing, and delegates every byte to the local daemon ([docs/FERRY-PLUGIN.md](docs/FERRY-PLUGIN.md)).
 
-| Key             | Action                                                         |
-| --------------- | -------------------------------------------------------------- |
-| `R` / `L` / `S` | Jump to **P**ipelines / Audit **L**og / **S**ettings from Home |
-| `A`             | Add a folder to the queue (in Pipelines)                       |
-| `Ctrl+R`        | Run the queue                                                  |
-| `Ctrl+C`        | Safely cancel the current run                                  |
-| `/`             | Search the audit log                                           |
-| `Ctrl+S`        | Save settings                                                  |
-| `Q`             | Quit                                                           |
+## Repository
 
-The TUI is optional — `ferry --no-tui` keeps you in CLI mode and prints command help.
+| Path | What |
+|---|---|
+| `cmd/ferry` | the binary: CLI, `daemon`, `mcp` |
+| `internal/` | the engine: `storage` (containment, no-replace publish, physical readback), `engine` (single-read fan-out, crash recovery, telemetry), `planner`, `preset`, `metadata`, `identity`, `ledger` (SQLite WAL), `p2p`, `daemon`, `ipc`, `mcp`, `policy`, `receipt`, `verify` |
+| `park_plugins/ferry` | the Park adapter (Python, standard library only) |
+| `packaging/` | systemd unit, launchd agent, example config |
+| `docs/` | quickstart, IPC protocol, plugin, the rewrite plan and the behavioral specs |
 
----
+Run `make vet lint race cross` to vet, lint, run the race-enabled tests and cross-build. The architecture and phase gates are in [docs/GO-BACKEND-REWRITE-PLAN.md](docs/GO-BACKEND-REWRITE-PLAN.md).
 
-## The CLI
-
-Each capability runs standalone or as part of the `run` pipeline. Step order in `run` is fixed: probe (always) → organize → proxy → resolve-project → verify. Skip any combination you don't need.
-
-| Command          | What it does                                                                                                        |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `probe`          | Run `ffprobe` on every file in a folder; capture codec, resolution, frame rate, color, audio, duration, size, mtime |
-| `organize`       | Re-arrange files into a structured layout, preserving the source's folder shape (cards/scenes/takes)                |
-| `proxy`          | Generate ProRes 422 Proxy (or any ProRes variant) at 1080p; aspect-preserving; keeps source timecode; skips non-video. On macOS it uses AVFoundation (hardware decode + ProRes engine), elsewhere `ffmpeg` — see `proxy_backend` |
-| `resolve create` | Create a DaVinci Resolve project programmatically; falls back to a JSON manifest if Resolve isn't running           |
-| `verify`         | Checksum a folder; on rerun, report what changed (added/modified/missing) — designed for cron                       |
-| `log`            | Query the audit log (text or JSON)                                                                                  |
-| `run`            | Orchestrate any combination of the above as a pipeline                                                              |
-
-### Everything else the CLI can do
-
-The table above is the media-ops pipeline. The CLI also exposes a set of
-application services — durable jobs, transfer planning, inventory, and so on.
-These are grouped, and each has its own subcommands:
-
-| Command       | What it does                                              |
-| ------------- | --------------------------------------------------------- |
-| `doctor`      | Check the environment `ferry` needs, before a transfer finds out for you |
-| `preflight`   | Plan preflight (vNext application services)                |
-| `transfer`    | Verified transfer execution (vNext application services)   |
-| `jobs`        | Durable job management (vNext application services)        |
-| `plan`        | Transfer plans (vNext application services)                |
-| `inventory`   | Source inventories (vNext application services)            |
-| `source`      | Source inspection (vNext application services)             |
-| `destination` | Saved destinations (vNext application services)            |
-| `intake`      | Intake planning (vNext application services)               |
-| `project`     | Manage projects (vNext application services)               |
-| `receipt`     | Receipt export (vNext application services)                |
-| `reconcile`   | Project reconciliation (vNext application services)        |
-| `preset`      | Immutable preset revisions (vNext application services)    |
-| `tui`         | Launch the interactive TUI (alternative to subcommands)    |
-
-`ferry doctor` is worth knowing about: it reports a missing `ffmpeg` up front
-rather than halfway through a transfer.
-
-`resolve` takes one subcommand, `create` (shown in the table above).
-
-Run `ferry <command> --help` for subcommands and flags. Example output:
-
-```
-$ ferry run ./raw/ --organize --proxy --resolve-project --verify --project-name "Episode-12"
-
-Step 1: probe
-  Probed 4 file(s)
-Step 2: organize
-  Copied 4, skipped 0
-Step 3: proxy
-  Generated 4 proxy file(s)
-Step 4: resolve-project
-  Created Resolve project (v20.0)
-Step 5: verify
-  Clean: 4 file(s) verified
-
-Done.
-```
-
-### A cron-ready verify
-
-```cron
-# Every night at 3am, verify the backup drive and alert on any change
-0 3 * * * cd /path/to/workspace && ferry verify /Volumes/Backup/ || mail -s "Backup alert" me@example.com
-```
-
-Exit codes from `verify`: `0` = clean, `1` = missing, `2` = modified, `3` = added.
-
----
-
-## Installation
-
-**Requirements:**
-
-- **Python 3.11+** (for `tomllib` stdlib)
-- **FFmpeg** with `ffprobe` on `$PATH` (or pointed at via config)
-- **DaVinci Resolve Studio** (free tier is fine) — only required for `resolve create`; everything else works without it
-
-**Install:**
-
-```bash
-git clone https://github.com/Lunar-Park/lp-ferry.git
-cd lp-ferry
-pipx install .                # clean isolated install
-#   — or —
-pip install .                 # into your current environment
-```
-
-**From a working tree (development):**
-
-```bash
-git clone https://github.com/Lunar-Park/lp-ferry.git
-cd lp-ferry
-pip install -e ".[dev]"
-```
-
-**Verify:**
-
-```bash
-ferry --version
-ferry --help
-```
-
----
-
-## Configuration (optional)
-
-ferry works with sensible defaults. Drop a `ferry.toml` in your project root or `~/.ferry/` to override. Search order: `--config <path>` / `FERRY_CONFIG` env var → `./ferry.toml` → `~/.ferry/config.toml`.
-
-```toml
-# Proxy generation defaults (any ProRes variant)
-proxy_codec = "ProRes422Proxy"
-proxy_height = 1080
-
-# Checksum algorithm: xxhash (default, ~10x faster) | sha256
-checksum_algo = "xxhash"
-```
-
-See [`ferry.toml.example`](./ferry.toml.example) for the full reference.
-
-**Unknown keys are rejected.** A typo like `proxy_heigth = 720` (or
-`[proxy] heigth = 720`) fails at startup naming the offending key, rather than
-being ignored while `ferry` silently uses its default. This is deliberate — a
-setting you meant to change and did not is worse than a loud failure.
-
-### Upgrading from media-mate (v0.2.x)
-
-v0.2.4 renamed the project, and with it every path it reads. Nothing is migrated
-automatically — `ferry` looks only at the new locations, and your old data is
-left untouched where it is. To carry it over:
-
-```bash
-mv ~/.media-mate ~/.ferry                      # config + audit log
-mv ~/.ferry/media-mate.db ~/.ferry/ferry.db    # the database itself
-mv ./media-mate.toml ./ferry.toml              # per-project config, if you have one
-```
-
-The desktop app keeps its data separately, under
-`~/Library/Application Support/ferry/` (was `.../media-mate/`) on macOS. That
-directory holds the vNext database, operation receipts and diagnostic logs, so
-move it too — left behind, the app starts with an empty database and your
-projects, jobs and receipts are not carried over.
-
-The database schema did not change, so a moved `ferry.db` is read as-is.
-
----
-
-## The audit log
-
-Every operation writes to one local SQLite database, shared by the CLI, the TUI, and the desktop app. The schema covers runs, files, probes, proxies, projects, verifications, and organize operations.
-
-The default location is your platform's application-data directory:
-
-| Platform | Path |
-| --- | --- |
-| macOS | `~/Library/Application Support/ferry/ferry.db` |
-| Windows | `~/AppData/Local/ferry/ferry.db` |
-| Linux | `~/.local/share/ferry/ferry.db` |
-
-Override it with `--db <path>` or the `FERRY_DB` environment variable.
-
-If you have been using the CLI from a release before 0.3.1, your log is at `~/.ferry/ferry.db`. Ferry keeps reading it from there — nothing to migrate — as long as no application-data database exists yet. When both exist, the application-data one wins and `ferry` tells you which it picked. To adopt the old log deliberately, move it:
-
-```bash
-mv ~/.ferry/ferry.db "$HOME/Library/Application Support/ferry/ferry.db"   # macOS
-```
-
-Note that `ferry.toml` / `config.toml` resolution is unchanged and still looks in `~/.ferry/`.
-
-The log answers questions like:
-
-- _"When did this file get probed, and what was the result?"_
-- _"What got copied during the last organize run?"_
-- _"When was this Resolve project created, and from what source folder?"_
-- _"What was the checksum of this file at the last verify?"_
-
-It's the system of record — back it up, copy it between machines, trust it as ground truth. Query from the TUI's **Audit Log** screen or the CLI:
-
-```bash
-ferry log            # text table
-ferry log --format json
-ferry log --limit 5
-```
-
----
-
-## Roadmap
-
-The next product direction is documented in
-[`docs/FILE-FERRY-PRODUCT-DIRECTION.md`](./docs/FILE-FERRY-PRODUCT-DIRECTION.md):
-a local-first desktop workstation for verified card offload, existing-folder
-adoption, project reconciliation, and a retained CLI/TUI.
-
-The full build plan is in
-[`docs/FILE-FERRY-FULL-APP-IMPLEMENTATION-PLAN.md`](./docs/FILE-FERRY-FULL-APP-IMPLEMENTATION-PLAN.md).
-Its implementation packages are built out (shell, IPC, services,
-screens, packaging), but "landed packages" is not a production claim:
-the operator-owned release gates (signing/notarization, real-media
-suite, soak, security review) have not been run — see §16 of the plan.
-
-The next scoped increment — saved destinations, organization presets,
-and verified copy-only transfers — is specified in
-[`docs/DESTINATION-PRESETS-PRODUCTION-SPEC.md`](./docs/DESTINATION-PRESETS-PRODUCTION-SPEC.md)
-and tracked in its execution report. Nothing in that spec is a shipped
-feature until the report says so.
-
-Longer-term ideas (not yet scheduled):
-
-- Scene detection (PySceneDetect)
-- Audio loudness analysis
-- Watch-folder mode
-- Cloud-storage adapters
-
----
-
-## Contributing
-
-Open source under the MIT license. Issues and PRs welcome on
-[GitHub](https://github.com/Lunar-Park/lp-ferry).
-
-Before you start, please read **[`CONTRIBUTING.md`](./CONTRIBUTING.md)** — it
-covers setup, the exact gates CI runs, what state the project is actually in
-(the Python engine is mature; the desktop app is not yet
-production-validated), and the scope decisions that are already settled.
-
-Development setup:
-
-```bash
-git clone https://github.com/Lunar-Park/lp-ferry.git
-cd lp-ferry
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-
-pytest
-ruff check . && ruff format --check .
-mypy src
-```
-
-Full specification: [`SPEC.md`](./SPEC.md).
-
-### Project governance
-
-| | |
-| --- | --- |
-| Contributing guide | [`CONTRIBUTING.md`](./CONTRIBUTING.md) |
-| Code of conduct | [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md) |
-| Security policy | [`SECURITY.md`](./SECURITY.md) — report privately, do not open a public issue |
-| Licence | MIT — [`LICENSE`](./LICENSE) |
-
-Accessibility: the desktop app's keyboard and labelling work is complete and
-maintained. **Screen-reader support has been explicitly declined by the
-maintainer** and is out of scope — that is a decision, not an oversight, and
-issues requesting a VoiceOver or NVDA pass will be closed without discussion.
-
----
+The Python CLI/TUI and the Electron desktop app this replaced are preserved at the `legacy-python-v0.3` tag.
 
 ## License
 
-MIT — see [`LICENSE`](./LICENSE).
+MIT. See [LICENSE](LICENSE).

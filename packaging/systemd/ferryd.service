@@ -1,0 +1,54 @@
+# Ferry v2 daemon for headless Linux (NAS / server).
+#
+# Install:
+#   sudo useradd --system --home-dir /var/lib/ferry --shell /usr/sbin/nologin ferry
+#   sudo install -m 0755 ferry /usr/local/bin/ferry
+#   sudo install -m 0644 ferryd.service /etc/systemd/system/ferryd.service
+#   sudo install -d -o ferry -m 0700 /var/lib/ferry/.ferry
+#   sudo -u ferry editor /var/lib/ferry/.ferry/ferry.toml   # [[roots]] the daemon may read/write
+#   sudo systemctl daemon-reload && sudo systemctl enable --now ferryd
+#
+# The control socket is /var/lib/ferry/.ferry/ferry.sock (0600, owned by
+# ferry): run the CLI as that user, e.g. `sudo -u ferry ferry status`.
+# Every [[roots]] path must be writable by the ferry user and listed in
+# ReadWritePaths below (ProtectSystem=strict makes everything else
+# read-only to the daemon).
+
+[Unit]
+Description=Ferry verified file transport daemon
+Documentation=https://github.com/Lunar-Park/lp-ferry
+After=network-online.target local-fs.target remote-fs.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=ferry
+Group=ferry
+Environment=HOME=/var/lib/ferry
+ExecStart=/usr/local/bin/ferry daemon
+Restart=on-failure
+RestartSec=5
+# Let an in-flight chunk finish and the receipt record: a stop cancels
+# transfers cleanly (they stay resumable).
+TimeoutStopSec=30
+KillSignal=SIGTERM
+LimitNOFILE=65536
+
+# Hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/ferry
+# ReadWritePaths=/mnt/studio-nas      <- add each rw root here
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -1,5 +1,7 @@
 # Road to production
 
+> **Historical.** This describes the Python/Electron app retired in Ferry v2; that code is preserved at the `legacy-python-v0.3` tag. Ferry is now the Go binary — see [GO-QUICKSTART.md](GO-QUICKSTART.md).
+
 The complete remaining work, in order. **Every numbered item is one PR.**
 Branch each off `main` directly — do not stack. Stop and report after each.
 

@@ -1,9 +1,30 @@
 id = "ferry"
 name = "File Ferry"
-version = "0.1.0"
-park = ">=0.1"
-summary = "Ingest: card offloads, proxies, Resolve projects and transfer receipts."
+version = "0.4.0"
+park = ">=0.1,<0.2"
+summary = "Ingest through the ferry engine: card offloads, machine-to-machine sends, receipts, proxies and Resolve projects."
 modules = ["park_plugins.ferry.records", "park_plugins.ferry.ops"]
+
+[app]
+title = "File Ferry"
+description = "Ingest, transfers and proxies"
+category = "Media"
+icon = "folder"
+tint = "amber"
+source = "https://github.com/Lunar-Park/lp-ferry"
+
+[app.standalone]
+name = "Ferry"
+bundle_id = "dev.lunarpark.ferry"
+
+[[views]]
+id = "ingest"
+title = "Ferry"
+entry = "views/ingest.js"
+place = "library"
+scoped = true
+requires = ["ferry.ingest.list", "ferry.plan"]
+hint = "bring media in: cards, proxies and transfers"
 
 [[calls]]
 name = "plan"
@@ -17,15 +38,15 @@ handler = "park_plugins.ferry.jobs:copy"
 needs = []
 egress = "none"
 
-[[jobs]]
-name = "stage"
-handler = "park_plugins.ferry.jobs:stage"
+[[calls]]
+name = "engine"
+handler = "park_plugins.ferry.jobs:engine_call"
 needs = []
-egress = "none"
+timeout = 30
 
 [[jobs]]
-name = "land"
-handler = "park_plugins.ferry.jobs:land"
+name = "send"
+handler = "park_plugins.ferry.jobs:send"
 needs = []
 egress = "lan"
 

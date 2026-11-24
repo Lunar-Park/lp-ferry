@@ -19,7 +19,7 @@ def test_defaults_match_the_shipped_example():
     assert settings.proxy_height == 1080
     assert settings.proxy_backend == "auto"
     assert settings.checksum_algo == "xxhash"
-    example = Path(__file__).resolve().parents[2] / "ferry.toml.example"
+    example = Path(__file__).resolve().parents[2] / "park_plugins" / "ferry" / "config.toml.example"
     text = example.read_text(encoding="utf-8")
     for key in ("proxy_codec", "proxy_height", "proxy_backend", "checksum_algo", "organize"):
         assert key in text

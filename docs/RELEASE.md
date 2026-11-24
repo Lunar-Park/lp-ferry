@@ -1,158 +1,42 @@
-# Release — packaged build, signing, and operational policy (Package 9)
+# Release
 
-This document captures the packaged-release and operational-hardening
-decisions for the desktop application (plan §10 Pkg9, §11.3).
+Ferry ships as one static binary per platform: `linux/amd64`, `linux/arm64`, `darwin/arm64` and `darwin/amd64`. It is built with `CGO_ENABLED=0`, so it needs no C toolchain on the build machine or at runtime.
 
 ## Build a release
 
-```bash
-# freeze the sidecar + stamp provenance + build + package
-ARCH=arm64 PLATFORM=mac scripts/package-release.sh
+Go releases are tagged `v2.x.y`. Older `v0.*` tags and `legacy-python-v0.3` belong to the retired Python app; [GoReleaser](../.goreleaser.yaml) ignores them.
+
+```sh
+goreleaser check                         # validates .goreleaser.yaml (CI runs this too)
+goreleaser release --snapshot --clean    # local dry run: dist/ferry_2.0.0-dev+<commit>_<os>_<arch>.tar.gz
+git tag v2.0.0 && goreleaser release     # a real (draft) release, once a maintainer decides to publish
 ```
 
-`scripts/package-release.sh`:
-1. Freezes the Python sidecar into `desktop/sidecar/{arch}/ferry-service`
-   (PyInstaller onefile) — the same `build:sidecar` used by `package:*`.
-2. Checks that **every** arch `build/electron-builder.yml` declares has a
-   usable sidecar of that architecture (`node scripts/check-sidecars.ts`).
-3. Stamps release provenance (version, git commit, build time, arch) into
-   `desktop/shared/release.ts` via `scripts/stamp-release.js`. The runtime
-   surfaces it through `app.diagnostics`, so a diagnostic report identifies
-   the exact build.
-4. Builds the renderer/main/preload.
-5. Packages with electron-builder (macOS DMG by default; `PLATFORM=win` /
-   `PLATFORM=linux` for the others).
+Before archiving, the release runs `go test -race` over everything. Each archive holds the binary, `LICENSE`, `SECURITY.md`, the quickstart, the IPC protocol, the example config and both service files. `checksums.txt` lists the SHA-256 of every archive. Releases are created as drafts; a maintainer publishes them.
 
-## The sidecar guard
+For a quick local build without GoReleaser, `make cross` builds the same four binaries into `bin/`.
 
-`scripts/check-sidecars.ts` runs on every packaging path and **fails the
-build** when a declared arch has no usable sidecar. It is not optional, and it
-exists because the alternative is silent:
+## Where things live
 
-`extraResources.from: 'sidecar/${arch}'` does not fail when that directory is
-missing. electron-builder logs one informational line and exits 0:
+| What | macOS | Linux |
+|---|---|---|
+| Daemon config | `~/.ferry/ferry.toml` | `~/.ferry/ferry.toml` |
+| Control socket (0600) | `~/.ferry/ferry.sock` | `~/.ferry/ferry.sock` |
+| Identity key (0600) | `~/.ferry/identity.key` | `~/.ferry/identity.key` |
+| Ledger (SQLite, WAL) | `~/Library/Application Support/ferry/ferry.db` | `~/.local/share/ferry/ferry.db` |
+| Receipts | `~/.ferry/receipts/<receipt_id>.json` | `~/.ferry/receipts/<receipt_id>.json` |
+| Park plugin config | `~/.ferry/config.toml` | `~/.ferry/config.toml` |
 
-```
-• file source doesn't exist  from=.../desktop/sidecar/x64
-=== PACKAGE EXIT 0 ===
-```
+`FERRY_DB` overrides the ledger path, and the `[daemon]` keys override the socket, ledger and receipts paths. Under the systemd unit, `~` is `/var/lib/ferry`.
 
-The bundle it produces has no `Contents/Resources/sidecar/` at all, and
-`electron/sidecar-command.ts` throws `sidecar executable not found in packaged
-resources` on first launch. It installs, it opens, it is dead. Reproduced
-2026-10-05; an engine-less `ferry-0.0.0.dmg` (x64) had already been produced
-this way on 2026-09-18.
+The identity key is the machine's Ed25519 identity, which paired machines have pinned. Back it up with the ledger. Losing it means pairing again; copying it to another machine would let that machine impersonate this one.
 
-The guard also reads the Mach-O header and rejects a sidecar frozen for the
-wrong architecture, which is the failure `ARCH=x64` used to produce: the stamp
-recorded x64 while `build:sidecar` defaulted to `$(uname -m)`. `ARCH` is now
-threaded through, and a build that reports the wrong arch in its own
-diagnostics fails instead.
+## Signing and notarization
 
-The same "declared but never built" class of defect is why Windows and Linux
-were removed as targets in #203. `scripts/verify-packaged.sh` checks the same
-property after the fact, on a path you pass by hand; the guard is the
-pre-flight half. Run both.
+Not done yet. The macOS binary is unsigned. Embedding it in the signed SwiftUI app bundle is the intended route, and the static build makes that a plain copy.
 
-## Validate a packaged build
+## Operational policy
 
-```bash
-scripts/verify-packaged.sh desktop/release/mac-arm64/ferry.app
-```
-
-`scripts/verify-packaged.sh` asserts:
-- the frozen sidecar exists at `Contents/Resources/sidecar/`
-  (the resource that must live **outside** `app.asar`),
-- the frozen sidecar launches and serves the JSON-RPC protocol
-  (`app.getCapabilities` round-trip in a fresh, temporary database),
-- `app.asar` is present for main/preload/renderer.
-
-The renderer build is unpacked via `asarUnpack: dist/renderer/**` so the
-`file://` load path resolves outside the archive (plan §10 Pkg9 step 1).
-
-## Clean-machine / clean-app-data procedure (plan §10 Pkg9 step 3)
-
-Repeatable first-run verification:
-
-```bash
-scripts/clean-app-data.sh            # dry run: what would be removed
-scripts/clean-app-data.sh --apply    # actually clear app data
-```
-
-This removes the legacy config/audit db (`~/.ferry`) and the Electron
-userData dir (`~/Library/Application Support/ferry`, where receipts,
-logs, and the vNext db live). After it, the next launch is a pristine first
-run that exercises fresh migrations from an empty store.
-
-For a true **clean machine** (no build artifacts): clone the repo fresh,
-`pip install -e .` into a new venv, `cd desktop && npm ci && npm run build`,
-then run the clean-app-data procedure and verify-packaged against the built
-app. See the root `README.md` development-setup section for the environment.
-
-## Release gates (plan §11.3)
-
-Do not call the app stable until all are true:
-
-- Full automated matrix green on the supported macOS architectures
-  (pytest, desktop typecheck/lint/tests/build, gitleaks).
-- `node scripts/check-sidecars.ts` passes: every arch the release config
-  declares has a matching frozen sidecar. It runs automatically in
-  `package:mac`, `package:mac:local` and `package-release.sh`; a green
-  package step implies it, but it is listed because "every declared arch was
-  actually built" is exactly the claim a green build has been getting wrong.
-- Migration, package, and clean-app-data tests pass from a released prior DB.
-- Real-media suite passes on at least two storage configurations.
-- A prolonged offload/proxy soak completes with no orphaned jobs, stale
-  sidecars, locked database, or incorrect safety state.
-- A reviewer can inspect receipts and reproduce the claimed result.
-- Security review confirms renderer isolation and no unintended listener or
-  privileged IPC surface.
-- Signed/notarized package installation and update/rollback policy are proven.
-
-## macOS signing & notarization
-
-`desktop/build/electron-builder.yml` already sets:
-- `hardenedRuntime: true`, `gatekeeperAssess: false`
-- `entitlements` / `entitlementsInherit`: `build/entitlements.mac.plist`
-- `notarize: true`, `dmg.sign: true`
-
-The entitlements allow JIT/unsigned-executable-memory/library-validation
-(needed for the Electron runtime) and grant user-selected + Downloads
-read-write (for choosing media roots); camera/microphone are explicitly
-disabled.
-
-**Operator prerequisite:** signing/notarization require an Apple Developer
-ID + notarization credentials in the CI/environment. The config is present;
-a real signed/notarized build must be produced and verified (gate list
-above) before a stable release. Until then, local builds run unsigned for
-development.
-
-## App data locations
-
-| Surface | Location |
-| --- | --- |
-| Legacy config + audit db | `~/.ferry/` |
-| Electron userData (receipts, logs, vNext db) | `~/Library/Application Support/ferry/` (macOS) |
-| Diagnostic logs | `~/Library/Application Support/ferry/logs/` |
-| Sidecar frozen binary (packaged) | `Contents/Resources/sidecar/ferry-service` |
-
-## Release / update policy (plan §10 Pkg9 step 4)
-
-**Auto-update is disabled.** There is no `publish` block in
-`electron-builder.yml` and no updater dependency, so a packaged app never
-self-updates. This is deliberate:
-
-> Auto-update must be disabled until update signing, rollback, and release
-> verification are proved.
-
-Until then, updates are distributed as signed artifacts and installed
-manually, with the provenance stamp in each build's diagnostics identifying
-the exact source. When auto-update is later enabled, it must first satisfy:
-signed update artifacts, a proven rollback path, and release verification.
-
-## Release provenance
-
-Every packaged build carries `version`, `commit`, `buildTime`, and `arch`
-in `desktop/shared/release.ts` (stamped at build time). The runtime prepends
-these to the `app.diagnostics` summary, so a diagnostic report from any
-installed build identifies exactly what shipped and from which commit.
+- **Upgrades:** stop the daemon, replace the binary, then start it again. The ledger migrates forward on open; migrations are never edited once shipped.
+- **Unfinished transfers:** a transfer that was running when the daemon stopped becomes `needs_attention` at the next start. `ferry resume <id>` reconciles it without re-copying verified files.
+- **Health:** `ferry doctor` checks the setup, with or without the daemon running.

@@ -23,8 +23,10 @@ def test_manifest_loads_and_declares_what_the_plugin_builds():
     assert manifest.id == "ferry"
     assert manifest.package == "park_plugins.ferry"
     assert manifest.satisfies_park("0.1.0")
-    assert [job.name for job in manifest.jobs] == ["copy", "stage", "land", "proxy", "resolve"]
-    assert not manifest.views
+    assert [job.name for job in manifest.jobs] == ["copy", "send", "proxy", "resolve"]
+    assert [(view.id, view.place, view.entry) for view in manifest.views] == [
+        ("ingest", "library", "views/ingest.js")
+    ]
     assert "ingest" in manifest.summary.lower()
 
 
@@ -57,7 +59,7 @@ def test_the_ops_park_asks_for_exist(call):
         "ferry.receipt.get",
         "ferry.receipt.list",
         "ferry.send",
-        "ferry.send.land",
+        "ferry.send.plan",
         "ferry.send.fail",
     ):
         assert name in names
@@ -68,7 +70,7 @@ def test_the_package_imports_without_park():
     code = (
         "import sys; sys.modules['park'] = None;"
         "import park_plugins.ferry, park_plugins.ferry.config, park_plugins.ferry.probe,"
-        "park_plugins.ferry.layout, park_plugins.ferry.copy, park_plugins.ferry.jobs;"
+        "park_plugins.ferry.layout, park_plugins.ferry.engine, park_plugins.ferry.jobs;"
         "print('ok')"
     )
     done = subprocess.run(

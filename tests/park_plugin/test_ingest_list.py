@@ -6,9 +6,9 @@ import pytest
 
 pytest.importorskip("park", reason="park is not installed")
 
-pytestmark = pytest.mark.usefixtures("no_queue")
+from park_plugins.ferry import jobs
 
-from park_plugins.ferry import jobs  # noqa: E402 - after the park importorskip above
+pytestmark = pytest.mark.usefixtures("no_queue", "engine")
 
 
 def _plan(call, card, destination, label=None):

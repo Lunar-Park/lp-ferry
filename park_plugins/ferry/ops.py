@@ -1,7 +1,10 @@
-"""Ferry's ops: plans, offloads, receipts, verification, proxies and Resolve projects.
+"""Ferry's ops: plans, offloads, sends, receipts, verification, proxies and Resolve projects.
 
-A plan is built from the folder in front of us and kept as an event, so the offload that
-follows reads what was decided rather than the card. The three jobs (``copy``, ``proxy``,
+Planning, copying, machine-to-machine transport and re-verification are done by the local
+Go engine (``ferry daemon``; see ``engine``). These ops keep Park's side: the events, the
+index the Ingest view reads, project filing and the job queue. A plan is the engine's plan,
+recorded as an event under the engine's id and fingerprint, so the offload that follows
+starts exactly what was reviewed. The three jobs (``copy``, ``proxy``,
 ``resolve``) report through the transfer and receipt ops here, which is how a file that
 landed becomes a row the Ingest view and ``ferry.receipt.get`` can show.
 """
@@ -22,8 +25,7 @@ from park.ops import Conflict, Invalid, NotFound, OpContext, Unavailable, op
 from park.ops import resolve as resolve_op
 
 from . import config as ferry_config
-from . import layout, records
-from .copy import hash_file
+from . import engine, layout, records
 from .probe import scan
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -153,6 +155,20 @@ def _digest(files: list[dict]) -> str:
 # -- plans -------------------------------------------------------------------------
 
 
+def _engine_plan(source: str, destination: str, **kwargs: Any) -> dict:
+    """``engine.build`` with its failures as Park errors."""
+    try:
+        return engine.build(source, destination, **kwargs)
+    except engine.PlanError as exc:
+        raise Invalid(str(exc)) from exc
+    except engine.EngineUnavailableError as exc:
+        raise Unavailable(str(exc)) from exc
+    except engine.EngineError as exc:
+        if exc.code == engine.NOT_FOUND:
+            raise NotFound(str(exc)) from exc
+        raise Invalid(str(exc)) from exc
+
+
 @_op(
     "ferry.plan",
     summary="Probe a source folder and build the transfer plan.",
@@ -191,13 +207,23 @@ def ferry_plan(
     else:
         settings = _config(config_path)
         root = _folder(source, "source")
-        plan = layout.build(root, destination, settings, label=label, read_probe=probe)
+        target = Path(destination).expanduser()
+        if root.resolve() == target.resolve() or target.resolve().is_relative_to(root.resolve()):
+            raise Invalid("the destination must not be inside the source")
+        # Park offloads name their destination explicitly; the folder is made here, empty,
+        # so the engine can bind and probe it before anything is approved.
+        target.mkdir(parents=True, exist_ok=True)
+        plan = _engine_plan(
+            str(root),
+            str(target),
+            template=settings.template,
+            on_conflict=settings.on_conflict,
+            label=label,
+        )
     if not plan["files"]:
         raise Invalid(f"no files to plan under {plan['source']}")
-    plan_id = ids.new_id()
     created = _now()
     result = {
-        "id": plan_id,
         "created": created,
         **plan,
         "project": scope["id"] if scope else None,
@@ -579,12 +605,8 @@ def _absolute(value: str, where: str) -> str:
     return posixpath.normpath(text)
 
 
-def _landing_path(root: str, rel: str) -> str:
-    """Where ``rel`` lands under ``root``; a name that would climb out of it is refused."""
-    clean = posixpath.normpath(str(rel or ""))
-    if not rel or posixpath.isabs(rel) or clean in (".", "..") or clean.startswith("../"):
-        raise Invalid(f"{rel!r} is not a path inside the folder being sent")
-    return posixpath.join(root, clean)
+def _engine_on(ctx: OpContext, machine: str, params: dict) -> dict:
+    return ctx.node_call("ferry.engine", params, machine=machine)
 
 
 @_op(
@@ -602,39 +624,45 @@ def ferry_send(
     label: Annotated[str | None, "Name for the send; the source folder's name when absent"] = None,
     project: Annotated[str | None, "Project id or slug"] = None,
 ) -> dict:
-    """Queues the first of two jobs. The source machine hashes and registers every file in
-    place (``ferry.stage``); when that finishes, the destination machine is told to fetch each
-    one straight from the source machine's file server (``ferry.land``). No byte passes through
-    the hub and nothing is staged on a third machine, and the source is never changed."""
+    """Queues one job, on the destination machine, which pulls every file straight from the
+    source machine's ferry engine and verifies it there. The two engines are paired here the
+    first time (each pins the other's key); afterwards every connection is mutual TLS on
+    those keys. No byte passes through the hub, nothing is staged on a third machine, and the
+    source is never changed. The source machine serves only folders under its ``[[roots]]``."""
     root, target = _absolute(source, "source"), _absolute(destination, "destination")
     origin = ctx.call("machines.get", {"machine": source_machine})
     landing = ctx.call("machines.get", {"machine": destination_machine})
     if origin["id"] == landing["id"]:
         raise Invalid("source and destination are the same machine; plan an offload instead")
     scope = ctx.call("project.get", {"project": project}) if project else None
+    src = _engine_on(ctx, origin["id"], {"action": "info"})
+    dst = _engine_on(ctx, landing["id"], {"action": "info"})
+    if src["peer_id"] not in dst["paired"] or dst["peer_id"] not in src["paired"]:
+        code = _engine_on(ctx, origin["id"], {"action": "pair_start"})["code"]
+        _engine_on(ctx, landing["id"], {"action": "pair_complete", "code": code})
     transfer = ids.new_id()
     job_id, queued = _submit(
         ctx,
-        "stage",
+        "send",
         {
             "transfer": transfer,
             "source": root,
             "destination": target,
-            "destination_machine": landing["id"],
+            "source_peer": src["peer_id"],
             "label": label or posixpath.basename(root),
             "project": scope["id"] if scope else None,
         },
-        origin["id"],
+        landing["id"],
     )
     if not queued:
-        raise Unavailable("Park did not accept the stage job")
+        raise Unavailable("Park did not accept the send job")
     ctx.write(
         "ferry.transfer.queued",
         {
             "id": transfer,
             "plan": "",
             "job": job_id,
-            "machine": origin["id"],
+            "machine": landing["id"],
             "total": 0,
             "queued": _now(),
         },
@@ -649,109 +677,57 @@ def ferry_send(
 
 
 @_op(
-    "ferry.send.land",
-    summary="Plan the landing of a staged send and queue it on the destination machine.",
+    "ferry.send.plan",
+    summary="Record the plan a send's destination machine built with its engine.",
     effect="write",
-    returns="{plan, transfer, job, machine}",
+    returns="the recorded plan",
 )
-def ferry_send_land(
+def ferry_send_plan(
     ctx: OpContext,
     transfer: Annotated[str, "Transfer id from ferry.send"],
-    source_machine: Annotated[str, "Machine the files were staged on"],
-    source: Annotated[str, "Folder on that machine"],
-    destination_machine: Annotated[str, "Machine to land them on"],
-    destination: Annotated[str, "Folder on that machine"],
-    items: Annotated[list[dict], "Staged files: [{rel, source, size, mtime, kind, sha256}]"],
-    label: Annotated[str | None, "Name for the plan"] = None,
+    plan: Annotated[dict, "The engine's plan, from the send job"],
+    machine: Annotated[str, "Machine that planned it and will land it"],
+    job: Annotated[str | None, "The send job"] = None,
     project: Annotated[str | None, "Project id or slug"] = None,
 ) -> dict:
-    """Called by the stage job once every file is hashed. The plan it records belongs to the
-    destination machine, so the land job's ownership checks are the ones every transfer has."""
+    """Called by the send job once the destination's engine has planned the pull. The plan
+    belongs to the destination machine, so the ownership checks every transfer has apply."""
     current = _transfer_row(ctx, transfer)
     if current["ended"] or current["plan"]:
-        raise Conflict(f"transfer {transfer} is not waiting to be landed")
-    origin = ctx.call("machines.get", {"machine": source_machine})["id"]
-    if current["machine"] != origin:
-        raise Conflict("the transfer was staged by a different machine")
-    landing = ctx.call("machines.get", {"machine": destination_machine})["id"]
-    root, target = _absolute(source, "source"), _absolute(destination, "destination")
-    if not items:
-        raise Invalid("there is nothing to land")
-    rows = []
-    for item in items:
-        digest = str(item.get("sha256") or "").strip().lower()
-        if not SHA256_RE.match(digest):
-            raise Invalid(f"file {item.get('rel')!r} needs a 64 character sha256")
-        size = item.get("size")
-        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
-            raise Invalid(f"file {item.get('rel')!r} needs a non-negative size")
-        rows.append(
-            {
-                "rel": str(item["rel"]),
-                "source": str(item.get("source") or ""),
-                "dest": _landing_path(target, item["rel"]),
-                "size": size,
-                "mtime": item.get("mtime"),
-                "kind": str(item.get("kind") or ""),
-                "action": layout.COPY,
-                # A send plan keeps the hash the source machine computed in the item's probe, because
-                # that is the one fact a landing is checked against and no column holds it.
-                "probe": {"sha256": digest},
-            }
-        )
-    if len({row["dest"] for row in rows}) != len(rows):
-        raise Invalid("two files would land at the same path")
+        raise Conflict(f"transfer {transfer} is not waiting for a plan")
+    landing = ctx.call("machines.get", {"machine": machine})["id"]
+    if current["machine"] != landing or current["job"] != job:
+        raise Conflict("the transfer was queued for a different machine or job")
+    for field in ("id", "fingerprint", "source", "destination", "items"):
+        if field not in plan:
+            raise Invalid(f"the plan is missing {field}")
     scope = ctx.call("project.get", {"project": project}) if project else None
-    plan_id = ids.new_id()
-    by_kind: dict[str, int] = {}
-    for row in rows:
-        by_kind[row["kind"]] = by_kind.get(row["kind"], 0) + 1
-    plan = {
-        "id": plan_id,
+    record = {
+        **plan,
         "created": _now(),
-        "label": label or posixpath.basename(root),
-        "source": root,
-        "destination": target,
-        "template": "{root}/{source_relpath}",
-        "on_conflict": "skip",
-        "fingerprint": layout.fingerprint(rows),
-        "files": len(rows),
-        "copies": len(rows),
-        "skips": 0,
-        "bytes": sum(row["size"] for row in rows),
-        "by_kind": by_kind,
         "machine": landing,
         "mounts": None,
-        "items": rows,
         "project": scope["id"] if scope else None,
         "project_slug": scope["slug"] if scope else None,
     }
-    ctx.write("ferry.plan.created", plan, project=plan["project"])
-    job_id, queued = _submit(
-        ctx,
-        "land",
-        {"plan": plan_id, "transfer": transfer, "machine": landing, "source_machine": origin},
-        landing,
-    )
-    if not queued:
-        raise Unavailable("Park did not accept the land job")
+    ctx.write("ferry.plan.created", record, project=record["project"])
     ctx.write(
         "ferry.transfer.queued",
         {
             "id": transfer,
-            "plan": plan_id,
-            "job": job_id,
+            "plan": plan["id"],
+            "job": job,
             "machine": landing,
-            "total": len(rows),
+            "total": plan.get("copies", 0),
             "queued": _now(),
         },
     )
-    return {"plan": plan_id, "transfer": transfer, "job": job_id, "machine": landing}
+    return record
 
 
 @_op(
     "ferry.send.fail",
-    summary="End a send that could not be staged, with the reason.",
+    summary="End a send that could not be planned, with the reason.",
     effect="write",
     returns="{transfer}",
 )
@@ -760,11 +736,11 @@ def ferry_send_fail(
     transfer: Annotated[str, "Transfer id from ferry.send"],
     errors: Annotated[list[str], "What went wrong, one line each"],
 ) -> dict:
-    """Called by the stage job when it cannot reach a plan. A send that already has a plan ends
-    through its landing receipt instead."""
+    """Called by the send job when it cannot reach a plan. A send that already has a plan ends
+    through its receipt instead."""
     current = _transfer_row(ctx, transfer)
     if current["ended"] or current["plan"]:
-        raise Conflict(f"transfer {transfer} is not waiting to be staged")
+        raise Conflict(f"transfer {transfer} is not waiting for a plan")
     problems = [str(line) for line in errors] or ["the send failed"]
     ctx.write(
         "ferry.transfer.finished",
@@ -1028,6 +1004,37 @@ def ferry_receipt_list(
 # -- verification ------------------------------------------------------------------
 
 
+def _legacy_verify(receipt: dict) -> dict:
+    """Receipts recorded before the engine carry only paths and hashes: re-hash them through
+    the page cache (no physical readback), in the engine's report shape."""
+    missing, modified, unreadable = [], [], []
+    checked = 0
+    for row in receipt.get("files") or []:
+        path = Path(row["dest"])
+        checked += 1
+        if not path.is_file():
+            missing.append(row["dest"])
+            continue
+        digest = sha256()
+        try:
+            with path.open("rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    digest.update(chunk)
+        except OSError as exc:
+            unreadable.append({"path": row["dest"], "error": str(exc)})
+            continue
+        if digest.hexdigest() != row["sha256"]:
+            modified.append(row["dest"])
+    target = {
+        "target_id": "legacy",
+        "root": "",
+        "missing": missing,
+        "modified": modified,
+        "unreadable": unreadable,
+    }
+    return {"checked": checked, "targets": [target], "readback_mode": "page_cache"}
+
+
 @_op(
     "ferry.verify",
     summary="Hash a transfer's destinations again and compare them with its receipt.",
@@ -1045,24 +1052,32 @@ def ferry_verify(
     """
     _transfer_row(ctx, transfer)
     receipt = _latest_receipt(ctx, transfer)
+    rel_of = {row["dest"]: row["rel"] or row["dest"] for row in receipt.get("files") or []}
     expected = {row["dest"]: row for row in receipt.get("files") or []}
-    missing: list[str] = []
-    modified: list[str] = []
-    unreadable: list[str] = []
-    checked = 0
-    for dest, row in expected.items():
-        path = Path(dest)
-        if not path.is_file():
-            missing.append(row["rel"] or dest)
-            continue
-        checked += 1
+    body = (receipt.get("detail") or {}).get("engine_receipt")
+    if not body:
+        report = _legacy_verify(receipt)
+    else:
         try:
-            landed = hash_file(path)
-        except OSError:
-            unreadable.append(row["rel"] or dest)
-            continue
-        if landed != row["sha256"]:
-            modified.append(row["rel"] or dest)
+            report = engine.verify_receipt(body)
+        except engine.EngineError as exc:
+            raise Unavailable(str(exc)) from exc
+    roots = {t["target_id"]: t["root"] for t in report.get("targets") or []}
+
+    def rels(key: str) -> list[str]:
+        out = []
+        for target in report.get("targets") or []:
+            for item in target.get(key) or []:
+                rel = item["path"] if isinstance(item, dict) else item
+                root = roots.get(target["target_id"], "")
+                dest = root.rstrip("/") + "/" + rel if root else rel
+                out.append(rel_of.get(dest, rel))
+        return out
+
+    missing = rels("missing")
+    modified = rels("modified")
+    unreadable = rels("unreadable")
+    checked = report.get("checked", 0) - len(missing)
 
     added: list[str] = []
     if folder is not None:
@@ -1115,11 +1130,7 @@ def ferry_proxies(
     root = _folder(source, "source")
     chosen_codec = codec or settings.proxy_codec
     height = target_height or settings.proxy_height
-    plan = layout.build(root, destination, settings)
-    items = [
-        {"rel": item["rel"], "source": item["source"], "proxy": item["dest"]}
-        for item in layout.video_items(plan["items"])
-    ]
+    items = layout.proxy_items(root, destination)
     if not items:
         raise Invalid(f"no video to proxy under {root}")
     request = ids.new_id()
@@ -1209,6 +1220,9 @@ __all__ = [
     "ferry_receipt_list",
     "ferry_receipt_record",
     "ferry_resolve_project",
+    "ferry_send",
+    "ferry_send_fail",
+    "ferry_send_plan",
     "ferry_source_list",
     "ferry_transfer_get",
     "ferry_transfer_list",

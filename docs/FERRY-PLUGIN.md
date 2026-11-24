@@ -1,142 +1,101 @@
-# Ferry as a park plugin
+# Ferry as a Park plugin
 
-Ferry ships twice: the `ferry` CLI in `src/file_ferry/` and the plugin in
-`park_plugins/ferry/`. This page describes the plugin. The CLI stays as it is until the
-cutover, so nothing that runs today depends on the plugin being loaded.
+`park_plugins/ferry/` is a thin adapter between Park and the ferry engine, the Go `ferry daemon` running on the same machine (see [GO-QUICKSTART.md](GO-QUICKSTART.md)).
 
-The plugin has no third-party runtime dependency. `config`, `probe`, `layout` and `copy`
-are standard library only and import without park; `records` and `ops` are what park
-loads, and `jobs` imports park only for types.
+**What Park keeps:** its ops, events, records, project filing, the job queue and the Ingest view.
 
-## Ops
+**What the engine does:** everything that touches bytes. That covers planning, the verified copy, machine-to-machine transport and re-verification. The plugin never copies a file or decides where one lands.
 
-Every op is `ferry.<...>`. Reads return rows, writes emit events, external ops touch the
-disk outside park's write lock.
+**What stays in Python:** proxies and Resolve projects.
 
-| Op | Effect | What it does |
-|---|---|---|
-| `ferry.plan` | external | Scan a source folder, probe the media, render a destination for every file, record the plan |
-| `ferry.plan.get` | read | One plan with every file in it, or the first `items_limit` of them |
-| `ferry.plan.list` | read | Plans, newest first |
-| `ferry.source.list` | read | Source folders ferry has planned from, and whether each is mounted |
-| `ferry.ingest.list` | read | The Ingest view's one read: the sources, and one row per offload with its newest transfer and receipt joined (plus a row per proxy or Resolve receipt) |
-| `ferry.offload` | write | Queue a plan's copy as a `ferry.copy` job and record the transfer |
-| `ferry.transfer.get` | read | One transfer with its progress |
-| `ferry.transfer.list` | read | Transfers, newest first |
-| `ferry.transfer.start` | write | Mark a transfer running (the copy job's first call) |
-| `ferry.transfer.progress` | write | Record how far a transfer has got, a few percent at a time |
-| `ferry.receipt.record` | write | Write the receipt for a job; a copy receipt also closes its transfer |
-| `ferry.receipt.get` | read | One receipt, with every file, hash and destination |
-| `ferry.receipt.list` | read | Receipt summaries, newest first |
-| `ferry.send` | write | Send a folder from one machine's disk to another's: queue the stage job on the source machine |
-| `ferry.send.land` | write | Called by the stage job: plan the landing and queue the land job on the destination machine |
-| `ferry.send.fail` | write | Called by the stage job when it cannot reach a plan: end the transfer with the reason |
-| `ferry.verify` | external | Hash a transfer's destinations again and compare with its receipt |
-| `ferry.proxies` | write | Queue a `ferry.proxy` job for the video in a folder |
-| `ferry.resolve_project` | write | Record a Resolve project request and queue a `ferry.resolve` job |
+The plugin has no third-party runtime dependency, and only `records` and `ops` import Park.
+- **`engine`:** the daemon client: JSON-RPC over `$FERRY_SOCKET`, or `~/.ferry/ferry.sock` by default.
+- **`config`, `probe`, `layout`:** standard library only.
+- **`jobs`:** imports Park only for types.
 
-## Jobs
+## How a card offload runs
 
-| Job | Needs | What it does |
-|---|---|---|
-| `ferry.copy` | nothing | Copies each planned file with a hash check on the way in and out, then registers it with `job.register_output` so it lands as an Asset by hash. A mismatch is reported, not counted as copied |
-| `ferry.stage` | nothing | On the source machine: hashes every file in place and registers it as an Asset whose path is on that machine. Copies nothing, writes nothing to the source. Declares `egress = "none"` |
-| `ferry.land` | nothing | On the destination machine: fetches each staged file by hash straight from the source machine's file server (`fetch_asset(..., from_machine=)`), writes it under the destination, hashes it again, and registers it. A file that arrives with another hash is deleted and reported. Existing destinations are preserved. Declares `egress = "lan"` |
-| `ferry.proxy` | `ffmpeg` | Encodes a ProRes proxy per item and registers each proxy |
-| `ferry.resolve` | nothing | Writes the project manifest and, when Resolve's scripting module is installed, creates the project. The manifest is the deliverable when it is not |
+```
+ferry.plan   -> engine plan.create (mirror-source preset)  -> ferry.plan.created
+ferry.offload-> ferry.copy job on the owning machine
+ferry.copy   -> engine transfer.start, progress relayed     -> ferry.transfer.*
+             -> engine receipt, each file registered in Park -> ferry.receipt.recorded
+```
 
-`ferry.copy` needs the source mounted where the job runs; that is checked per file and
-reported as `source is not mounted`, so a job that lands on the wrong node fails loudly
-instead of copying nothing.
+**The plan:**
+- **Identity:** the Park plan *is* the engine's plan. It has the same id and the same fingerprint, so the copy job starts exactly what was reviewed.
+- **Approval:** starting the plan consumes the engine's single-use approval. Before anything moves, the engine re-checks every source and every destination path.
+- **What a stale plan means:** a file that changed, or one that appeared at the destination, means the plan has to be made again. Nothing is copied over it.
 
-## Events and tables
+**The copy:** for each file the engine writes a job-owned temp file, fsyncs it, reads it back from disk with the cache bypassed, compares hashes, and publishes it without replacing anything.
 
-| Event | Table |
-|---|---|
-| `ferry.plan.created` | `ferry_plans`, `ferry_plan_items` |
-| `ferry.transfer.queued` | `ferry_transfers` |
-| `ferry.transfer.started` | `ferry_transfers` |
-| `ferry.transfer.progress` | `ferry_transfers` |
-| `ferry.transfer.finished` | `ferry_transfers` |
-| `ferry.receipt.recorded` | `ferry_receipts` |
-| `ferry.verify.recorded` | `ferry_verifications` |
-| `ferry.proxies.requested` | `ferry_proxy_requests` |
-| `ferry.resolve.requested` | `ferry_resolve_requests` |
+**Park's cross-check:** the job then registers each landed file with Park, which hashes it independently. A file counts as verified only when both hashes agree.
 
-The plan event carries every file, so a plan is one event and one row per file. A receipt
-carries every file it records, with the SHA-256 of what landed; `ferry.verify` reads that
-receipt as its baseline.
+**The receipt:** a Park copy receipt carries `detail.engine`, which holds the engine's transfer, receipt, plan, status and digest. It also carries `detail.engine_receipt`, the full `ferry-receipt-v2`.
 
 ## Sending between machines
 
-`ferry.send` moves a folder from one machine's disk to another's with every file hashed at both
-ends, a receipt that names both machines, and every step an op an agent can call.
-
 ```
-ferry.send -> stage job (source machine) -> ferry.send.land -> land job (destination machine)
+ferry.send -> pair the two engines once (ferry.engine call on each machine)
+           -> ferry.send job on the destination machine
+ferry.send job -> engine plan.create with the source on the source machine's engine
+               -> ferry.send.plan (records the plan, owned by the destination)
+               -> engine pull: straight from the source's disk, verified here
 ```
 
-The stage job hashes and registers the source in place. The land job takes each file straight from
-the source machine's node file server; the hub only says where that server is and carries no bytes,
-and nothing is staged on a third machine. A send plan is an ordinary plan row owned by the
-destination machine, and its items carry the hash the source computed in their `probe` object, so no
-table changed. The receipt is a `copy` receipt whose `detail.send` names both machines, which is what
-`ferry.verify` and the Ingest view already read.
+- **Trust:** the engines pin each other's Ed25519 keys the first time through Park, and every connection after that is mutual TLS 1.3.
+- **Access:** the source machine only serves folders under its `[[roots]]`, and only through a grant scoped to the transfer, the destination machine and the items.
+- **No relay:** the hub carries no bytes and nothing is staged on a third machine.
+- **Requirements:** each machine runs `ferry daemon` (with P2P on) as the same user as `park-node`. The source folder must be inside a `[[roots]]` entry on the source machine.
 
-Needs a Park with `fetch_asset(..., from_machine=)`, the source machine's
-node file server on and reachable from the destination (`serve_files`, a `bind` address the destination
-can reach, a correct `advertise_url`), and Ferry loaded on both nodes. A send never deletes the source.
-Not yet: a grant scoped to one transfer (today any valid node token can fetch a file by hash from a
-file server; the traffic is plain HTTP, so enable a file server only on a network you control — see
-`SECURITY.md`), a pre-check of the destination before the source is hashed, and Windows destinations.
+## Ops
 
-## `ferry.toml`
+| Op | Effect | What it does |
+|---|---|---|
+| `ferry.plan` | external | Plan a source folder with the engine (on the owning worker when `machine` is given) and record it |
+| `ferry.plan.get` / `.list` | read | One plan with its files / plans, newest first |
+| `ferry.source.list` | read | Source folders planned from, and whether each is mounted |
+| `ferry.ingest.list` | read | The Ingest view's one read |
+| `ferry.offload` | write | Queue a plan's copy as a `ferry.copy` job and record the transfer |
+| `ferry.send` | write | Pair the two machines' engines if needed, and queue the `ferry.send` job on the destination machine |
+| `ferry.send.plan` | write | Called by the send job: record the engine's plan and attach it to the transfer |
+| `ferry.send.fail` | write | Called by the send job when it cannot reach a plan |
+| `ferry.transfer.get` / `.list` / `.start` / `.progress` | read / write | Transfer rows and progress |
+| `ferry.receipt.record` / `.get` / `.list` / `.file` | write / read | Receipts, and filing verified media into a project |
+| `ferry.verify` | external | Re-verify a transfer's receipt with the engine's physical readback; `folder` also reports files the receipt never mentioned |
+| `ferry.proxies` | write | Queue a `ferry.proxy` job for the video in a folder |
+| `ferry.resolve_project` | write | Record a Resolve project request and queue a `ferry.resolve` job |
 
-The plugin reads the same file as the CLI: an explicit `config_path`, then `./ferry.toml`,
-then `~/.ferry/config.toml`, then defaults.
+Receipts recorded before the engine have no engine receipt. `ferry.verify` re-hashes them through the page cache and says so (`readback_mode: page_cache`).
 
-- Unknown keys are refused, at the top level and inside `[organize]` and `[proxy]`, before
-  any work starts. A typo cannot quietly keep a default in place.
-- `[proxy]` may hold `proxy_codec`, `proxy_height` and `proxy_backend`; the top level stays
-  canonical.
-- `organize.template` must contain `{root}` and `{filename}`, and may use `{source_relpath}`,
-  `{ext}`, `{date}`, `{codec_family}` and `{resolution_bucket}`.
-- `organize.mode = "move"` is refused: the plugin copies.
-- `checksum_algo` is accepted so an existing config loads, but identity is always SHA-256,
-  because that is what park's Assets are keyed by.
-- `proxy_backend` is accepted so an existing config loads, and proxies are encoded with
-  ffmpeg. Each proxy receipt records `backend: ffmpeg` rather than implying otherwise.
+## Jobs and calls
 
-## The Ingest view
+| Name | Kind | What it does |
+|---|---|---|
+| `plan` | call | Plan on the worker that can see both folders, with that worker's engine |
+| `engine` | call | This machine's engine: `info` (peer id, paired peers), `pair_start`, `pair_complete` |
+| `copy` | job | Run a planned offload with the engine; relay progress; register and record the receipt |
+| `send` | job | On the destination machine: plan against the source machine's engine, pull, register, record |
+| `proxy` | job (`ffmpeg`) | Encode a ProRes proxy per item and register each one |
+| `resolve` | job | Write the project manifest and, when Resolve's scripting module is installed, create the project |
 
-`views/ingest.js` exports `mount(el, api)` and is served at
-`/plugins/ferry/views/ingest.js`. park mounts it as the Library's Ingest tab. It draws from one
-read, `ferry.ingest.list`: a dense list with one row per offload (card, where it lands, size, and
-where it stands), grouped as in progress, needs a look, planned and done, with the cards in the
-sidebar as a filter. A row opens in the inspector (paths, the copy's figures, problems, and a page
-of the plan's files from `ferry.plan.get`). The page's one action plans a card (`ferry.plan`);
-a planned offload is queued, and a failed one retried, from its inspector (`ferry.offload`).
-Events on `ferry.plan.created`, `ferry.transfer.*` and `ferry.receipt.recorded` patch the rows
-they name, so progress costs no request.
+## Configuration
 
-## What the plugin does not do yet
+The plugin's own file is `~/.ferry/config.toml` (or `./ferry.toml`, or an explicit `config_path`); see [`park_plugins/ferry/config.toml.example`](../park_plugins/ferry/config.toml.example). Unknown keys are refused.
 
-- It does not divide a plan across several transfers; one plan is one transfer.
-- It does not encode with AVFoundation. The CLI's `proxy_backend = "auto"` preference is
-  not carried over.
-- It does not reverse a transfer, organise into a template other than the configured one,
-  or move media.
-- `ferry.offload`, `ferry.proxies` and `ferry.resolve_project` queue jobs through
-  `machines.job.submit` when that op exists, and otherwise record the work with
-  `queued: false`. The call shape ferry expects is pinned by `tests/park_plugin/test_machines.py`.
+- **`organize.template`:** offloads mirror the source (`{root}/{source_relpath}/{filename}{ext}`). Any other template is refused with a pointer to ferry presets.
+- **`organize.on_conflict`:**
+  - `skip` skips a file whose full checksum matches and otherwise keeps both.
+  - `rename` keeps both, as `name (2).ext`.
+  - `overwrite` is refused: Ferry never overwrites.
+- **`checksum_algo`:** accepted so an existing config loads. Copies are verified with SHA-256, the hash Park's Assets are keyed by.
+
+The engine has its own, separate `~/.ferry/ferry.toml` (roots, P2P port, agent policy).
 
 ## Tests
 
-`tests/park_plugin/` skips when park is not installed, which is the case in this repo's CI
-matrix (3.11 to 3.13, no park). To run them:
+`tests/park_plugin/` needs Park and builds the `ferry` binary from this checkout. Real daemons run per test: two P2P daemons on loopback stand in for two machines in the send tests. Without Park installed, the tests skip.
 
 ```sh
-uv venv -q -p 3.14 .venv
-uv pip install -q -p .venv pytest -e /path/to/park -e .
-.venv/bin/python -m pytest tests/park_plugin -q
+PYTHONPATH=/path/to/park:. /path/to/park/.venv/bin/python -m pytest tests/park_plugin -q
 ```

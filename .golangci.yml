@@ -1,0 +1,34 @@
+version: "2"
+linters:
+  default: standard
+  enable:
+    - errorlint
+    - gosec
+    - misspell
+    - unconvert
+  settings:
+    errcheck:
+      exclude-functions:
+        # Terminal output: a failed write to stdout/stderr has nowhere to go.
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Fprint
+    gosec:
+      excludes:
+        # File paths come from the operator, plans and receipts by design;
+        # containment is enforced in internal/storage, not by this lint.
+        - G304
+        # Ferry intentionally mirrors source permissions and uses 0o755
+        # directories under user-chosen destinations.
+        - G301
+        - G302
+        # Integer conversions between int64 sizes and syscall widths are
+        # bounded by file sizes.
+        - G115
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [gosec, errcheck]
+formatters:
+  enable:
+    - gofmt

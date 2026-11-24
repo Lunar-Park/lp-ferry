@@ -1,5 +1,7 @@
 # D-1 (§12.1) — disposable local pilot: written record
 
+> **Historical.** This describes the Python/Electron app retired in Ferry v2; that code is preserved at the `legacy-python-v0.3` tag. Ferry is now the Go binary — see [GO-QUICKSTART.md](../GO-QUICKSTART.md).
+
 **Result: PASS** for the §12.1 gate on the packaged macOS arm64 app.
 D-2 is gated on this record and is **not** claimed by it. This is a local
 pilot, not a production validation: an unsigned local build, local disks,
