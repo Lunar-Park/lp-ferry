@@ -1,0 +1,80 @@
+[
+  {
+    "host": "henry-slate",
+    "code": 0,
+    "out": "",
+    "err": "\u26a0 install out of sync (node: not installed or outdated; npm: not installed or outdated; pnpm: not installed or outdated; ripgrep: not installed or outdated) \u2014 run `hermes pm install`\n2026-11-23 15:03:25 [INFO] acp_adapter.entry: Loaded env from /Users/henry/.hermes/.env\n2026-11-23 15:03:25 [INFO] acp_adapter.entry: Starting hermes-agent ACP adapter\n2026-11-23 15:03:25 [INFO] hermes_cli.plugins: Plugin 'browser-browser-use' registered browser provider: browser-use\n2026-11-23 15:03:25 [INFO] hermes_cli.plugins: Plugin 'browser-browserbase' registered browser provider: browserbase\n2026-11-23 15:03:25 [INFO] hermes_cli.plugins: Plugin 'browser-firecrawl' registered browser provider: firecrawl\n"
+  },
+  {
+    "host": "lunar01",
+    "code": 0,
+    "out": "Darwin\narm64\nselene\nHOME=/Users/selene\nPATH=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin\n58677\n",
+    "err": ""
+  },
+  {
+    "host": "lunar02",
+    "code": 0,
+    "out": "Darwin\narm64\nllms04\nHOME=/Users/llms04\nPATH=/Users/llms04/bin:/Users/llms04/opt/lima/bin:/usr/bin:/bin:/usr/sbin:/sbin\n/Users/llms04/bin/ferry\n16811\n",
+    "err": ""
+  },
+  {
+    "host": "lunar04",
+    "code": 255,
+    "out": "",
+    "err": "ssh: connect to host lunar04.tail505f74.ts.net port 22: Operation timed out\n"
+  },
+  {
+    "host": "llms04",
+    "code": 255,
+    "out": "",
+    "err": "ssh: Could not resolve hostname llms04.tail505f74.ts.net: nodename nor servname provided, or not known\n"
+  },
+  {
+    "host": "llms01",
+    "code": 255,
+    "out": "",
+    "err": "ssh: Could not resolve hostname llms01.tail505f74.ts.net: nodename nor servname provided, or not known\n"
+  },
+  {
+    "host": "llms02",
+    "code": 255,
+    "out": "",
+    "err": "ssh: Could not resolve hostname llms02.tail505f74.ts.net: nodename nor servname provided, or not known\n"
+  },
+  {
+    "host": "titus",
+    "code": 0,
+    "out": "Linux\nx86_64\ndmtri\nHOME=/home/dmtri\nPATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin\n2716827 bash -c uname -s; uname -m; id -un; printf \"HOME=%s\\nPATH=%s\\n\" \"$HOME\" \"$PATH\"; command -v ferry; pgrep -af \"ferry|file-ferry\" || true\n",
+    "err": ""
+  },
+  {
+    "host": "kes",
+    "code": 0,
+    "out": "Linux\naarch64\ndmtri\nHOME=/home/dmtri\nPATH=/usr/local/bin:/usr/bin:/bin:/usr/games\n73734 bash -c uname -s; uname -m; id -un; printf \"HOME=%s\\nPATH=%s\\n\" \"$HOME\" \"$PATH\"; command -v ferry; pgrep -af \"ferry|file-ferry\" || true\n",
+    "err": ""
+  },
+  {
+    "host": "vulcan",
+    "code": 255,
+    "out": "",
+    "err": "ssh: Could not resolve hostname vulcan.tail505f74.ts.net: nodename nor servname provided, or not known\n"
+  },
+  {
+    "host": "mackbox",
+    "code": 0,
+    "out": "Linux\nx86_64\nmack\nHOME=/home/mack\nPATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/mack/.local/bin\n553559 bash -c uname -s; uname -m; id -un; printf \"HOME=%s\\nPATH=%s\\n\" \"$HOME\" \"$PATH\"; command -v ferry; pgrep -af \"ferry|file-ferry\" || true\n",
+    "err": ""
+  },
+  {
+    "host": "mackjr",
+    "code": 255,
+    "out": "",
+    "err": "ssh: connect to host mackjr.tail505f74.ts.net port 22: Operation timed out\n"
+  },
+  {
+    "host": "titus-win",
+    "code": 255,
+    "out": "",
+    "err": "ssh: connect to host titus-win.tail505f74.ts.net port 22: Operation timed out\n"
+  }
+]
