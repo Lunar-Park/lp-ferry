@@ -1,19 +1,24 @@
 {
   "states": {
     "waiting_clearance": {
-      "type": "tree",
+      "type": "flow",
       "title": "Waiting for a person",
-      "label": "What will move",
       "nodes": [
         {
           "id": "source",
           "label": "Source",
-          "note": "the folder on the machine that holds it"
+          "note": {
+            "$path": "$.params.source",
+            "fallback": "the folder on the machine that holds it"
+          }
         },
         {
           "id": "destination",
           "label": "Destination",
-          "note": "where the files land, verified"
+          "note": {
+            "$path": "$.params.destination",
+            "fallback": "where the files land, verified"
+          }
         },
         {
           "id": "receipt",
@@ -31,7 +36,7 @@
           "receipt"
         ]
       ],
-      "focus": "source",
+      "focus": "destination",
       "actions": [
         "approve",
         "decline"
@@ -41,12 +46,24 @@
       "type": "progress",
       "title": "Copying",
       "label": "Verified bytes",
-      "done": "bytes_verified",
-      "total": "bytes_total",
-      "unit": "bytes",
-      "note": "current_file",
-      "rate": "rate",
-      "eta": "eta_s",
+      "done": {
+        "$path": "$.progress.detail.bytes_verified",
+        "fallback": {
+          "$path": "$.progress.fraction",
+          "fallback": 0
+        }
+      },
+      "total": {
+        "$path": "$.progress.detail.bytes_total",
+        "fallback": 1
+      },
+      "note": {
+        "$path": "$.progress.detail.current_file",
+        "fallback": {
+          "$path": "$.progress.note",
+          "fallback": "Copying"
+        }
+      },
       "actions": [
         "open"
       ]
@@ -54,11 +71,41 @@
     "done": {
       "type": "receipt",
       "title": "Landed and verified",
-      "files": "files",
-      "bytes": "bytes",
-      "algorithm": "checksum_algo",
-      "verified": "verified",
-      "state": "verified",
+      "status": "ok",
+      "rows": [
+        {
+          "label": "Files",
+          "value": {
+            "$path": "$.result.files",
+            "fallback": "\u2014"
+          },
+          "evidence": "verified"
+        },
+        {
+          "label": "Bytes",
+          "value": {
+            "$path": "$.result.bytes",
+            "fallback": "\u2014"
+          },
+          "evidence": "verified"
+        },
+        {
+          "label": "Checksum",
+          "value": {
+            "$path": "$.result.checksum_algo",
+            "fallback": "xxh64"
+          },
+          "evidence": "verified"
+        },
+        {
+          "label": "Verified",
+          "value": {
+            "$path": "$.result.verified",
+            "fallback": "ok"
+          },
+          "evidence": "verified"
+        }
+      ],
       "actions": [
         "open"
       ]
@@ -68,12 +115,20 @@
       "title": "Did not finish",
       "items": [
         {
-          "label": "What went wrong",
-          "value": "error"
+          "label": "Transfer failed",
+          "state": "bad",
+          "note": {
+            "$path": "$.error",
+            "fallback": "Unknown error"
+          }
         },
         {
           "label": "File in flight",
-          "value": "current_file"
+          "state": "warn",
+          "note": {
+            "$path": "$.progress.detail.current_file",
+            "fallback": "\u2014"
+          }
         }
       ],
       "actions": [

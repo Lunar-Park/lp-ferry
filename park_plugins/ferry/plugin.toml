@@ -74,13 +74,13 @@ template = "cards/transfer.json"
 [[cards.actions]]
 id = "approve"
 label = "Approve"
-tone = "ok"
+tone = "approve"
 op = "machines.clearance.grant"
 
 [[cards.actions]]
 id = "decline"
 label = "Decline"
-tone = "bad"
+tone = "reject"
 op = "machines.clearance.deny"
 
 [[cards.actions]]
@@ -102,13 +102,13 @@ template = "cards/transfer.json"
 [[cards.actions]]
 id = "approve"
 label = "Approve"
-tone = "ok"
+tone = "approve"
 op = "machines.clearance.grant"
 
 [[cards.actions]]
 id = "decline"
 label = "Decline"
-tone = "bad"
+tone = "reject"
 op = "machines.clearance.deny"
 
 [[cards.actions]]

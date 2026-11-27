@@ -158,6 +158,62 @@ def test_a_plan_the_engine_parks_ends_as_waiting_not_failed(
     assert clearance["preview"].get("paused") is False
 
 
+def test_the_card_pack_matches_slates_visual_schema():
+    """The shapes Slate's resolver and Visuals.swift draw, exactly.
+
+    A card that names a visual Slate does not know, or puts a field where that visual does not
+    read it, is drawn as the generic fallback instead: the state still shows, but none of what
+    the plugin meant. These are the four mismatches a cross-repo review caught, kept out.
+    """
+    from park.plugins.manifest import Manifest
+
+    manifest = Manifest.load(PLUGIN / "plugin.toml")
+    template = json.loads((PLUGIN / "cards" / "transfer.json").read_text(encoding="utf-8"))
+    states = template["states"]
+
+    # `tree` expects root/children; this state is a path of three steps, which is a flow.
+    waiting = states["waiting_clearance"]
+    assert waiting["type"] == "flow"
+    assert [node["id"] for node in waiting["nodes"]] == ["source", "destination", "receipt"]
+    assert waiting["edges"] == [["source", "destination"], ["destination", "receipt"]]
+    assert waiting["nodes"][0]["note"] == {
+        "$path": "$.params.source",
+        "fallback": "the folder on the machine that holds it",
+    }
+    assert waiting["nodes"][1]["note"]["$path"] == "$.params.destination"
+    assert waiting["focus"] == "destination"
+
+    # Progress reads the numbers the job writes, with the fraction and the note as fallbacks.
+    running = states["running"]
+    assert running["type"] == "progress"
+    assert running["done"]["$path"] == "$.progress.detail.bytes_verified"
+    assert running["done"]["fallback"]["$path"] == "$.progress.fraction"
+    assert running["total"] == {"$path": "$.progress.detail.bytes_total", "fallback": 1}
+    assert running["note"]["$path"] == "$.progress.detail.current_file"
+    assert running["note"]["fallback"]["$path"] == "$.progress.note"
+
+    # A receipt is rows with a label, a value and its evidence, not loose top-level fields.
+    done = states["done"]
+    assert done["type"] == "receipt" and done["status"] == "ok"
+    assert [row["label"] for row in done["rows"]] == ["Files", "Bytes", "Checksum", "Verified"]
+    assert all(row["evidence"] == "verified" for row in done["rows"])
+    assert done["rows"][2]["value"] == {"$path": "$.result.checksum_algo", "fallback": "xxh64"}
+
+    # A status is items with a label, a state and a note.
+    failed = states["failed"]
+    assert failed["type"] == "status"
+    assert [(item["label"], item["state"]) for item in failed["items"]] == [
+        ("Transfer failed", "bad"),
+        ("File in flight", "warn"),
+    ]
+    assert failed["items"][0]["note"] == {"$path": "$.error", "fallback": "Unknown error"}
+    assert failed["items"][1]["note"]["$path"] == "$.progress.detail.current_file"
+
+    # Decision buttons carry the decision tones, which the app styles as approve and reject.
+    tones = {action.id: action.tone for card in manifest.cards for action in card.actions}
+    assert tones["approve"] == "approve" and tones["decline"] == "reject"
+
+
 def test_the_cards_declared_in_the_manifest_pass_parks_own_check():
     from park.plugins import contract
     from park.plugins.manifest import CARD_VISUALS, Manifest
