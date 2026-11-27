@@ -127,8 +127,10 @@ func (f *planFlags) bind(cmd *cobra.Command) {
 	_ = cmd.MarkFlagRequired("to")
 }
 
-func (f *planFlags) request(args []string) (model.PlanRequest, error) {
-	req := model.PlanRequest{PresetID: f.preset, ConflictPolicy: f.policy, Actor: "human"}
+func (f *planFlags) request(args []string, actor string) (model.PlanRequest, error) {
+	// Who the work is from: D ("human"), or an agent whose name makes the daemon apply the
+	// agent policy (internal/policy) instead of a human's allowances.
+	req := model.PlanRequest{PresetID: f.preset, ConflictPolicy: f.policy, Actor: actorName(actor)}
 	for _, a := range args {
 		req.Sources = append(req.Sources, parseSource(a, ""))
 	}
@@ -140,8 +142,8 @@ func (f *planFlags) request(args []string) (model.PlanRequest, error) {
 	}
 	for _, r := range f.roles {
 		label, role, ok := strings.Cut(r, "=")
-		if !ok {
-			return req, fmt.Errorf("--role wants LABEL=ROLE, got %q", r)
+		if !ok || label == "" || role == "" {
+			return req, usagef("--role wants LABEL=ROLE, got %q", r)
 		}
 		if req.CameraRoles == nil {
 			req.CameraRoles = map[string]string{}
@@ -175,7 +177,7 @@ func planCmd(g *globalFlags) *cobra.Command {
 	f := &planFlags{}
 	cmd := &cobra.Command{Use: "plan SOURCE... --to DEST", Short: "Build a reviewable plan (nothing is copied)", Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			req, err := f.request(args)
+			req, err := f.request(args, g.actor)
 			if err != nil {
 				return err
 			}
@@ -201,7 +203,7 @@ func sendCmd(g *globalFlags) *cobra.Command {
 	var yes, wait bool
 	cmd := &cobra.Command{Use: "send SOURCE... --to DEST", Short: "Plan, approve and run a verified copy in one step", Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			req, err := f.request(args)
+			req, err := f.request(args, g.actor)
 			if err != nil {
 				return err
 			}
@@ -217,14 +219,40 @@ func sendCmd(g *globalFlags) *cobra.Command {
 			var p daemon.PlanSummary
 			_ = json.Unmarshal(raw, &p)
 			out := cmd.OutOrStdout()
-			if !g.json {
-				_ = printPlan(out, raw)
+			// What a plan without --yes is, as JSON: an agent needs the id and the fingerprint
+			// to approve it, and the status to know whether it can run at all. One object per
+			// command, so the output of `send --json` always parses.
+			planned := map[string]any{
+				"plan_id":     p.ID,
+				"fingerprint": p.Fingerprint,
+				"status":      "awaiting_approval",
+				"blocking":    p.Blocking,
+				"summary":     raw,
 			}
 			if p.Blocking > 0 {
-				return &exitError{code: 1, err: errors.New("the plan has blocking items; nothing was copied")}
+				planned["status"] = "planned"
+			}
+			sayPlan := func() error {
+				if !g.json {
+					return printPlan(out, raw)
+				}
+				// With --yes the transfer's own JSON follows, so the plan is only spoken for a
+				// run that is not going to happen.
+				if yes && p.Blocking == 0 {
+					return nil
+				}
+				return g.print(out, mustJSON(planned), nil)
+			}
+			if err := sayPlan(); err != nil {
+				return err
+			}
+			if p.Blocking > 0 {
+				return &exitError{code: exitRefused, kind: "plan_blocked", err: errors.New("the plan has blocking items; nothing was copied")}
 			}
 			if !yes {
-				fmt.Fprintf(out, "review, then run: ferry approve %s --fingerprint %s   (or re-run with --yes)\n", p.ID, p.Fingerprint)
+				if !g.json {
+					fmt.Fprintf(out, "review, then run: ferry approve %s --fingerprint %s   (or re-run with --yes)\n", p.ID, p.Fingerprint)
+				}
 				return nil
 			}
 			if wait {
@@ -286,7 +314,8 @@ func follow(ctx context.Context, c *ipc.Client, id string, w io.Writer, asJSON b
 				fmt.Fprintf(w, "transfer %s %s  receipt %v\n", id, s["status"], res["receipt_path"])
 			}
 			if s["status"] != model.TransferCompleted {
-				return &exitError{code: 1}
+				return &exitError{code: exitRefused, kind: "transfer_incomplete",
+					err: errors.New("the transfer did not complete (" + s["status"] + ")")}
 			}
 			return nil
 		}
@@ -482,7 +511,7 @@ func doctorCmd(g *globalFlags) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, paths, err := g.resolve()
 			if err != nil {
-				return &exitError{code: 1, err: fmt.Errorf("config: %w", err)}
+				return &exitError{code: exitEnv, kind: "config", err: fmt.Errorf("config: %w", err)}
 			}
 			fmt.Fprintf(cmd.ErrOrStderr(), "config %s ok (%d roots)\n", paths.Config, len(cfg.Roots))
 			var checks []daemon.Check
@@ -514,7 +543,7 @@ func doctorCmd(g *globalFlags) *cobra.Command {
 				}
 			}
 			if bad > 0 {
-				return &exitError{code: 1}
+				return &exitError{code: exitRefused, kind: "checks_failed", err: errors.New("some checks failed; see above")}
 			}
 			return nil
 		}}

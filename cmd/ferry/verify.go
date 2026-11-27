@@ -13,6 +13,25 @@ import (
 	"github.com/Lunar-Park/lp-ferry/internal/verify"
 )
 
+// verifyKind names this command's failures in JSON: they are a check's outcome, not the CLI
+// contract's four codes, so a caller reads the category rather than guessing from a number.
+const verifyKind = "verify"
+
+func verifyKindFor(rep *verify.Report) string {
+	switch rep.ExitCode {
+	case 0:
+		return "ok"
+	case verify.ExitMissing:
+		return "verify_missing"
+	case verify.ExitModified:
+		return "verify_modified"
+	case verify.ExitAdded:
+		return "verify_added"
+	default:
+		return verifyKind
+	}
+}
+
 func addVerifyCmd(root *cobra.Command, g *globalFlags) {
 	var receiptPath, rootOverride, target, transferID, receiptID string
 	cmd := &cobra.Command{
@@ -35,29 +54,29 @@ When several categories apply the lowest non-zero code above 0 wins, except
 				// Through the daemon: local targets and targets on peers.
 				c, err := g.dial(cmd.Context())
 				if err != nil {
-					return &exitError{code: verify.ExitUnreadable, err: err}
+					return &exitError{code: verify.ExitUnreadable, kind: verifyKind, err: err}
 				}
 				defer func() { _ = c.Close() }()
 				var rep verify.Report
 				if err := c.Call(cmd.Context(), "verify.run", map[string]string{"transfer_id": transferID, "receipt_id": receiptID, "target_id": target}, &rep); err != nil {
-					return &exitError{code: verify.ExitUnreadable, err: err}
+					return &exitError{code: verify.ExitUnreadable, kind: verifyKind, err: err}
 				}
 				return report(cmd, g, &rep)
 			}
 			if receiptPath == "" {
-				return &exitError{code: verify.ExitUnreadable, err: errors.New("--receipt, --transfer or --receipt-id is required")}
+				return &exitError{code: verify.ExitUnreadable, kind: verifyKind, err: errors.New("--receipt, --transfer or --receipt-id is required")}
 			}
 			data, err := os.ReadFile(receiptPath)
 			if err != nil {
-				return &exitError{code: verify.ExitUnreadable, err: err}
+				return &exitError{code: verify.ExitUnreadable, kind: verifyKind, err: err}
 			}
 			rc, err := receipt.Parse(data)
 			if err != nil {
-				return &exitError{code: verify.ExitUnreadable, err: err}
+				return &exitError{code: verify.ExitUnreadable, kind: verifyKind, err: err}
 			}
 			rep, err := verify.Verify(cmd.Context(), rc, verify.Options{TargetID: target, Root: rootOverride})
 			if err != nil {
-				return &exitError{code: verify.ExitUnreadable, err: err}
+				return &exitError{code: verify.ExitUnreadable, kind: verifyKind, err: err}
 			}
 			return report(cmd, g, rep)
 		},
@@ -106,7 +125,7 @@ func report(cmd *cobra.Command, g *globalFlags, rep *verify.Report) error {
 		printReport(out, rep)
 	}
 	if rep.ExitCode != 0 {
-		return &exitError{code: rep.ExitCode}
+		return &exitError{code: rep.ExitCode, kind: verifyKindFor(rep)}
 	}
 	return nil
 }

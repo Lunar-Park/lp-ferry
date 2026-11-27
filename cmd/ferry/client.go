@@ -29,7 +29,7 @@ func (g *globalFlags) resolve() (config.Config, config.Paths, error) {
 	}
 	cfg, err := config.Load(path, explicit)
 	if err != nil {
-		return config.Config{}, config.Paths{}, err
+		return config.Config{}, config.Paths{}, envError("config", err)
 	}
 	paths := config.ResolvePaths(def, cfg, os.Getenv)
 	paths.Config = path
@@ -47,7 +47,9 @@ func (g *globalFlags) dial(ctx context.Context) (*ipc.Client, error) {
 	}
 	c, err := ipc.Dial(ctx, paths.Socket)
 	if err != nil {
-		return nil, fmt.Errorf("the ferry daemon is not reachable at %s (start it with `ferry daemon`): %w", paths.Socket, err)
+		// Nothing about the command was wrong: this machine has no daemon listening. Exit 3,
+		// so a script can tell "retry when the daemon is up" from "the daemon refused".
+		return nil, envError("unreachable", fmt.Errorf("the ferry daemon is not reachable at %s (start it with `ferry daemon`): %w", paths.Socket, err))
 	}
 	return c, nil
 }

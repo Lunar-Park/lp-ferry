@@ -21,8 +21,9 @@ from typing import Annotated, Any, Literal
 
 from park.kernel import ids
 from park.kernel.log import utc_now
-from park.ops import Conflict, Invalid, NotFound, OpContext, Unavailable, op
+from park.ops import Conflict, Forbidden, Invalid, NotFound, OpContext, Unavailable, op
 from park.ops import resolve as resolve_op
+from park.sdk import is_admin, job_worker
 
 from . import config as ferry_config
 from . import engine, layout, records
@@ -45,6 +46,22 @@ SOURCE_ROLE = "source"
 def _op(name: str, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Register one of ferry's ops. ``plugin`` is set here so ``op.list`` can filter."""
     return op(name, plugin="ferry", **kwargs)
+
+
+def _worker_only(ctx: OpContext, job: str | None, machine: str | None = None, *, what: str) -> None:
+    """Authorize a report that only the job running a transfer should make.
+
+    Three callers may: the node surface (park dispatched the call to that node, which is how a
+    job reaches these ops), a reviewer (D from the CLI or an app), and the machine actually
+    holding the job — which is what ``job_worker`` proves, from the queue rather than from
+    anything the caller says about itself. An agent's session is none of those, and used to be
+    able to report progress on, or close, a transfer it never ran.
+    """
+    if ctx.surface == "node" or is_admin(ctx):
+        return
+    if not job:
+        raise Forbidden(f"{what} has to name the job that ran it")
+    job_worker(ctx, job, machine=machine)
 
 
 def _now() -> str:
@@ -692,6 +709,7 @@ def ferry_send_plan(
 ) -> dict:
     """Called by the send job once the destination's engine has planned the pull. The plan
     belongs to the destination machine, so the ownership checks every transfer has apply."""
+    _worker_only(ctx, job, machine, what="recording a send's plan")
     current = _transfer_row(ctx, transfer)
     if current["ended"] or current["plan"]:
         raise Conflict(f"transfer {transfer} is not waiting for a plan")
@@ -739,6 +757,7 @@ def ferry_send_fail(
     """Called by the send job when it cannot reach a plan. A send that already has a plan ends
     through its receipt instead."""
     current = _transfer_row(ctx, transfer)
+    _worker_only(ctx, current["job"], what="ending a send")
     if current["ended"] or current["plan"]:
         raise Conflict(f"transfer {transfer} is not waiting for a plan")
     problems = [str(line) for line in errors] or ["the send failed"]
@@ -799,6 +818,7 @@ def ferry_transfer_start(
     machine: Annotated[str | None, "Node running it"] = None,
 ) -> dict:
     """The copy job calls this once, before its first file."""
+    _worker_only(ctx, job, machine, what="starting a transfer")
     current = _transfer_row(ctx, transfer)
     if current["ended"]:
         raise Conflict(f"transfer {transfer} already ended as {current['status']}")
@@ -819,22 +839,31 @@ def ferry_transfer_progress(
     done: Annotated[int, "Files finished so far"],
     total: Annotated[int, "Files in the transfer"],
     note: Annotated[str, "What it is doing now"] = "",
+    detail: Annotated[
+        dict | None,
+        "Live detail: bytes written and verified, rate, eta_s, current_file, phase, transport",
+    ] = None,
 ) -> dict:
-    """A long copy calls this in steps of a few percent, not once per file."""
+    """A long copy calls this about once a second, not once per file.
+
+    ``detail`` is optional and carried on the event, which is what a live view streams (the
+    Ingest view follows ``ferry.transfer.progress``); a caller that does not send it, or a
+    hub older than this op, is no worse off than before."""
     if done < 0 or total < 0 or done > total:
         raise Invalid("done must be between 0 and total")
-    _transfer_row(ctx, transfer)
+    current = _transfer_row(ctx, transfer)
+    _worker_only(ctx, current["job"], what="reporting transfer progress")
     fraction = 0.0 if total == 0 else round(done / total, 4)
-    ctx.write(
-        "ferry.transfer.progress",
-        {
-            "id": transfer,
-            "done": done,
-            "total": total,
-            "fraction": fraction,
-            "note": note,
-        },
-    )
+    event = {
+        "id": transfer,
+        "done": done,
+        "total": total,
+        "fraction": fraction,
+        "note": note,
+    }
+    if detail:
+        event["detail"] = {str(key): value for key, value in detail.items()}
+    ctx.write("ferry.transfer.progress", event)
     return records.transfer_out(_transfer_row(ctx, transfer))
 
 
@@ -861,6 +890,7 @@ def ferry_receipt_record(
     detail: Annotated[dict | None, "Anything else worth keeping with the receipt"] = None,
 ) -> dict:
     """A receipt is written once per job. Closing a transfer writes both events together."""
+    _worker_only(ctx, job, machine, what="recording a receipt")
     rows = _file_rows(files)
     if transfer is not None:
         current = _transfer_row(ctx, transfer)

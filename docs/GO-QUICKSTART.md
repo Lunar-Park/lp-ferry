@@ -98,6 +98,43 @@ ferry send /Volumes/CARD --to /Volumes/SSD --to fry_<server>:/mnt/studio-nas/Ing
 - **Access control:** the receiving machine only accepts writes into its `rw` roots.
 - **Path management:** `ferry peer list`, `ferry peer probe <peer>` (shows the paths and the chosen one), `ferry peer remove <peer>`.
 
+## Scripting an agent: `--json`, `--actor`, exit codes
+
+Any subcommand takes `--json`, and with it a failure is one object on stderr rather than a
+sentence:
+
+```sh
+ferry send /Volumes/CARD --to @ssd --json
+{"error": {"code": "usage", "message": "ferry send: required flag(s) \"to\" not set"}}
+```
+
+The exit code says what kind of failure it was, so a caller never has to parse English:
+
+| code | meaning |
+|------|---------|
+| 0 | ok |
+| 1 | refused: the daemon said no, a plan was blocked, the work failed |
+| 2 | usage: unknown flag, missing or extra argument |
+| 3 | environment: no daemon at the socket, or a config that cannot be read |
+
+`ferry verify` keeps its own codes `0`-`4` (clean, missing, modified, added, unreadable); it
+is a cron check, and its `--json` errors name the category (`verify_modified`, …).
+
+`ferry send --json` without `--yes` answers with the plan it built, so a program can approve
+or report it:
+
+```json
+{"plan_id": "pln_…", "fingerprint": "…", "status": "awaiting_approval", "blocking": 0, "summary": {…}}
+```
+
+`status` is `planned` when the plan has blocking items; the command then exits `1` with
+`plan_blocked`, and the same plan object is still on stdout.
+
+**Who the call is from.** `--actor NAME` (or `FERRY_ACTOR`, then `PARK_ACTOR`) names the
+actor a plan is made by. A bare name becomes `agent:NAME`, which is what makes the daemon
+apply `[agent_policy]` to it instead of a human's allowances — an agent that forgets the flag
+is on the record as `human`. `--actor human` says D.
+
 ## Agents (MCP)
 
 `ferry mcp` is an MCP server over stdio that talks to the running daemon. For Claude Code:

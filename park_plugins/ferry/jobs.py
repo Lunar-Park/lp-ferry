@@ -17,7 +17,9 @@ import json
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from time import monotonic
 from typing import TYPE_CHECKING, Any
 
 from . import config, engine, layout
@@ -34,7 +36,11 @@ PRORES_PROFILES = {
     "prores4444": 4,
     "prores4444xq": 5,
 }
-PROGRESS_STEPS = 20
+# How often engine progress becomes a report: at most once a second, or as soon as it has
+# moved this far, whichever comes first. The engine emits several events a second per target;
+# a report per event would flood the event log and the job's heartbeat for nothing.
+PROGRESS_INTERVAL_S = 1.0
+PROGRESS_CHANGE = 0.02
 
 
 class JobInputError(ValueError):
@@ -204,6 +210,130 @@ def _finish(
     }
 
 
+class _ProgressReporter:
+    """Relays the engine's progress into Park, throttled, with the detail a live view reads.
+
+    ``detail`` is the structured half of a progress report: bytes written and verified, the
+    total, a rate and an ETA, the file in flight, the phase (writing, verifying, publishing)
+    and which transport that file is crossing. It rides on ``job.progress`` for park-node,
+    which keeps it beside the job's fraction, and on ``ferry.transfer.progress`` for park,
+    whose event the Ingest view streams.
+
+    Throttled to one report a second, or sooner when the transfer has moved
+    ``PROGRESS_CHANGE`` of the way: the engine's own events are far more frequent than
+    anything a person or a log wants.
+    """
+
+    def __init__(
+        self,
+        job: JobContext,
+        transfer: str,
+        total: int,
+        total_bytes: int,
+        errors: list[str],
+        *,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        self.job = job
+        self.transfer = transfer
+        self.total = max(1, total)
+        self.total_bytes = max(1, total_bytes)
+        self.errors = errors
+        self.clock = clock or monotonic
+        self.last_at: float | None = None
+        self.last_fraction = -1.0
+        self.stopped = False
+        # Cleared once a park older than `detail` has refused it: the rest of the copy then
+        # reports what that park takes rather than failing on every event.
+        self.with_detail = True
+
+    def __call__(self, p: dict) -> None:
+        if self.stopped:
+            return
+        try:
+            fraction = float(p.get("overall_fraction") or 0)
+        except (TypeError, ValueError):
+            return
+        fraction = max(0.0, min(1.0, fraction))
+        now = self.clock()
+        if (
+            self.last_at is not None
+            and now - self.last_at < PROGRESS_INTERVAL_S
+            and fraction - self.last_fraction < PROGRESS_CHANGE
+        ):
+            return
+        self.last_at, self.last_fraction = now, fraction
+        detail = self.detail(p)
+        self.report(
+            fraction,
+            f"{detail['bytes_verified']} of {detail['bytes_total']} bytes verified",
+            detail,
+        )
+
+    def detail(self, p: dict) -> dict:
+        """The engine's event as the eight numbers and names a view shows."""
+        targets = [t for t in (p.get("targets") or []) if isinstance(t, dict)]
+        # The file in flight is what a person is watching for; a phase with no file yet is
+        # still worth saying, so the first target is the fallback.
+        moving = next((t for t in targets if t.get("current_file")), targets[0] if targets else {})
+        rate = sum(_number(t.get("write_bps")) for t in targets)
+        eta = _number(p.get("eta_seconds"))
+        if not eta:
+            eta = _number(moving.get("eta_seconds"))
+        return {
+            "bytes_written": _count(p.get("bytes_written")),
+            "bytes_verified": _count(p.get("bytes_verified")),
+            "bytes_total": _count(p.get("total_bytes")) or self.total_bytes,
+            "rate": round(rate, 1) if rate else None,
+            "eta_s": round(eta, 1) if eta else None,
+            "current_file": str(moving.get("current_file") or "") or None,
+            "phase": str(moving.get("phase") or "") or None,
+            "transport": str(moving.get("transport_badge") or "") or None,
+        }
+
+    def report(self, fraction: float, note: str, detail: dict) -> None:
+        from park.ops import ParkError
+        from park.sdk.node import NodeError
+
+        try:
+            self.job.progress(fraction, note, detail=detail)
+        except TypeError:
+            # A park-node older than structured progress takes (fraction, note) and no more.
+            self.job.progress(fraction, note)
+        payload = {
+            "transfer": self.transfer,
+            "done": min(self.total, round(fraction * self.total)),
+            "total": self.total,
+            "note": note,
+        }
+        try:
+            if self.with_detail:
+                try:
+                    self.job.call("ferry.transfer.progress", {**payload, "detail": detail})
+                    return
+                except (NodeError, ParkError) as exc:
+                    # Either a park that does not know `detail`, or a real problem; sending the
+                    # report it does take settles which, and costs nothing when it lands twice.
+                    self.with_detail = False
+                    self.job.log(f"transfer progress without detail: {exc}")
+            self.job.call("ferry.transfer.progress", payload)
+        except (NodeError, ParkError) as exc:
+            # The copy itself goes on; the receipt says Park missed the progress.
+            self.errors.append(f"Park did not confirm transfer progress: {exc}")
+            self.stopped = True
+
+
+def _number(value: Any) -> float:
+    """A JSON number that may be missing, a string, or nonsense: 0.0 when it is not one."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    return max(0.0, float(value))
+
+
+def _count(value: Any) -> int:
+    return int(_number(value))
+
+
 def _execute(
     job: JobContext, plan: dict, transfer: str, *, register_role: str = "transfer"
 ) -> dict:
@@ -214,35 +344,8 @@ def _execute(
     total_bytes = max(
         1, sum(item["size"] for item in plan.get("items") or [] if item["action"] == "copy")
     )
-    last = [-1]
-
     errors: list[str] = []
-
-    def on_progress(p: dict) -> None:
-        from park.ops import ParkError
-        from park.sdk.node import NodeError
-
-        fraction = float(p.get("overall_fraction") or 0)
-        step = int(fraction * PROGRESS_STEPS)
-        if step == last[0] or last[0] == -2:
-            return
-        last[0] = step
-        done = min(total, round(fraction * total))
-        job.progress(fraction, f"{p.get('bytes_verified', 0)} of {total_bytes} bytes verified")
-        try:
-            job.call(
-                "ferry.transfer.progress",
-                {
-                    "transfer": transfer,
-                    "done": done,
-                    "total": total,
-                    "note": f"{p.get('bytes_verified', 0)} of {total_bytes} bytes verified, ETA {p.get('eta_seconds')}s",
-                },
-            )
-        except (NodeError, ParkError) as exc:
-            # The copy itself goes on; the receipt says Park missed the progress.
-            errors.append(f"Park did not confirm transfer progress: {exc}")
-            last[0] = -2
+    on_progress = _ProgressReporter(job, transfer, total, total_bytes, errors)
 
     state = None
     try:
