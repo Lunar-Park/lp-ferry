@@ -117,6 +117,11 @@ def test_a_park_without_clearances_queues_exactly_as_before(park, call, studio, 
         "machines.clearance.get",
     ):
         monkeypatch.delitem(REGISTRY, name, raising=False)
+    # An older Park also has a submit that does not take `clearance`: without that, the job
+    # is queued already paused in one write, which is the current form, not the old one.
+    monkeypatch.delitem(
+        REGISTRY["machines.job.submit"].params["properties"], "clearance", raising=False
+    )
     result = agent_call(park)("ferry.offload", {"plan": studio})
     assert "clearance" not in result, "an older hub has no clearances, and the copy still queues"
     assert call("machines.job.get", {"job": result["job"]})["status"] == "queued"

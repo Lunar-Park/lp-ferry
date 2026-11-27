@@ -118,24 +118,64 @@ def _latest_receipt(ctx: OpContext, transfer: str) -> dict:
     return records.receipt_out(row)
 
 
-def _submit(ctx: OpContext, job: str, params: dict, machine: str | None) -> tuple[str | None, bool]:
+def _submit(
+    ctx: OpContext,
+    job: str,
+    params: dict,
+    machine: str | None,
+    *,
+    clearance: dict | None = None,
+) -> tuple[str | None, bool, str | None]:
     """Queue one of this plugin's jobs, when park's machines layer is loaded.
 
-    Returns ``(job id, queued)``. A home without the machines ops records the work
-    without a queue, which is the state before park-node exists.
+    Returns ``(job id, queued, clearance id)``. A home without the machines ops records the
+    work without a queue, which is the state before park-node exists.
+
+    ``clearance`` asks Park to queue the job already paused: one write, so no node can lease
+    it between the submit and the decision. A Park older than that rejects the unknown
+    argument, and then the job is queued as it always was and the caller asks for the
+    clearance in the second step (``_request_clearance``), which leaves the window Park's
+    atomic form closes. Everything here works against both.
     """
     try:
         resolve_op("machines.job.submit")
     except NotFound:
-        return None, False
-    result = ctx.call(
-        "machines.job.submit",
-        {"plugin": "ferry", "name": job, "params": params, "machine": machine},
-    )
+        return None, False, None
+    args = {"plugin": "ferry", "name": job, "params": params, "machine": machine}
+    if clearance is None:
+        result = ctx.call("machines.job.submit", args)
+    else:
+        try:
+            result = ctx.call("machines.job.submit", {**args, "clearance": clearance})
+        except Invalid as exc:
+            if "clearance" not in str(exc):
+                raise
+            # An older Park: queue it, then pause it as a second step.
+            result = ctx.call("machines.job.submit", args)
     job_id = None
+    clearance_id = None
     if isinstance(result, dict):
         job_id = result.get("id") or result.get("job")
-    return job_id, bool(job_id)
+        decided = result.get("clearance")
+        if isinstance(decided, dict):
+            clearance_id = decided.get("id")
+        elif isinstance(decided, str):
+            clearance_id = decided
+        clearance_id = clearance_id or result.get("clearance_id")
+    return job_id, bool(job_id), clearance_id
+
+
+def _clearance_args(op: str, transfer: str, reason: str, preview: dict | None = None) -> dict:
+    """The clearance that goes with a submit: what a person is deciding, and what to show.
+
+    The shape is ``machines.clearance.request``'s, minus the job: Park links the job it was
+    queued with, so a caller never names an id that does not exist yet.
+    """
+    return {
+        "op": op,
+        "reason": reason,
+        "preview": {"transfer": transfer, "paused": True, **(preview or {})},
+    }
 
 
 def _request_clearance(
@@ -644,21 +684,26 @@ def ferry_offload(
     params = {"plan": plan, "transfer": transfer}
     if owner:
         params["machine"] = owner
-    job_id, queued = _submit(ctx, "copy", params, machine)
+    # An agent's copy over the auto-approve limit waits for a person. Asking for the
+    # clearance *with* the submit means no node can lease the job in between; a Park older
+    # than that gets the request as a second step.
+    wants = _needs_clearance(ctx, ctx.actor, int(row["bytes"] or 0))
+    reason = f"{ctx.actor} asked to copy {row['bytes']} bytes; over the auto-approve limit"
+    preview = {"plan": plan, "machine": machine, "files": row["files"], "bytes": row["bytes"]}
+    job_id, queued, clearance_id = _submit(
+        ctx,
+        "copy",
+        params,
+        machine,
+        clearance=_clearance_args("ferry.offload", transfer, reason, preview) if wants else None,
+    )
     if owner and not queued:
         raise Unavailable("Park did not accept the copy job")
     total = row["files"] if owner else row["copies"]
-    clearance = None
-    if queued and _needs_clearance(ctx, ctx.actor, int(row["bytes"] or 0)):
-        # An agent's copy over the auto-approve limit waits for a person: Park pauses the
-        # queued job, so no node picks it up until the clearance is granted.
+    clearance = {"id": clearance_id} if clearance_id else None
+    if queued and wants and clearance is None:
         clearance = _request_clearance(
-            ctx,
-            op="ferry.offload",
-            transfer=transfer,
-            reason=f"{ctx.actor} asked to copy {row['bytes']} bytes; over the auto-approve limit",
-            preview={"plan": plan, "machine": machine, "files": total, "bytes": row["bytes"]},
-            job=job_id,
+            ctx, op="ferry.offload", transfer=transfer, reason=reason, preview=preview, job=job_id
         )
     ctx.write(
         "ferry.transfer.queued",
@@ -730,7 +775,13 @@ def ferry_send(
         code = _engine_on(ctx, origin["id"], {"action": "pair_start"})["code"]
         _engine_on(ctx, landing["id"], {"action": "pair_complete", "code": code})
     transfer = ids.new_id()
-    job_id, queued = _submit(
+    # A send's size is only known once its plan exists, so an agent's send waits for a person
+    # before a node is asked to plan it at all — in the same write as the submit when Park
+    # can do that, and as a second step when it cannot.
+    wants = _needs_clearance(ctx, ctx.actor, 0)
+    reason = f"{ctx.actor} asked to send {root} to {landing['name']}"
+    preview = {"source": root, "destination": target, "machine": landing["id"]}
+    job_id, queued, clearance_id = _submit(
         ctx,
         "send",
         {
@@ -742,20 +793,14 @@ def ferry_send(
             "project": scope["id"] if scope else None,
         },
         landing["id"],
+        clearance=_clearance_args("ferry.send", transfer, reason, preview) if wants else None,
     )
     if not queued:
         raise Unavailable("Park did not accept the send job")
-    clearance = None
-    if _needs_clearance(ctx, ctx.actor, 0):
-        # A send's size is only known once its plan exists, so an agent's send waits for a
-        # person before a node is asked to plan it at all.
+    clearance = {"id": clearance_id} if clearance_id else None
+    if wants and clearance is None:
         clearance = _request_clearance(
-            ctx,
-            op="ferry.send",
-            transfer=transfer,
-            reason=f"{ctx.actor} asked to send {root} to {landing['name']}",
-            preview={"source": root, "destination": target, "machine": landing["id"]},
-            job=job_id,
+            ctx, op="ferry.send", transfer=transfer, reason=reason, preview=preview, job=job_id
         )
     ctx.write(
         "ferry.transfer.queued",
@@ -1281,7 +1326,7 @@ def ferry_proxies(
         "target_height": height,
         "ffmpeg_path": settings.ffmpeg_path,
     }
-    job_id, queued = _submit(ctx, "proxy", params, machine)
+    job_id, queued, _ = _submit(ctx, "proxy", params, machine)
     record = {
         "id": request,
         "source": str(root),
@@ -1332,7 +1377,7 @@ def ferry_resolve_project(
         "frame_rate": frame_rate,
         "color_space": color_space,
     }
-    job_id, queued = _submit(ctx, "resolve", params, machine)
+    job_id, queued, _ = _submit(ctx, "resolve", params, machine)
     record = {
         "id": request,
         "source": str(root),

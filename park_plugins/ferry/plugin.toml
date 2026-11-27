@@ -84,11 +84,6 @@ tone = "reject"
 op = "machines.clearance.deny"
 
 [[cards.actions]]
-id = "retry"
-label = "Retry"
-op = "ferry.transfer.start"
-
-[[cards.actions]]
 id = "open"
 label = "Open in Ferry"
 app = true
@@ -110,11 +105,6 @@ id = "decline"
 label = "Decline"
 tone = "reject"
 op = "machines.clearance.deny"
-
-[[cards.actions]]
-id = "retry"
-label = "Retry"
-op = "ferry.offload"
 
 [[cards.actions]]
 id = "open"

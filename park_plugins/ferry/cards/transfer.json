@@ -132,7 +132,6 @@
         }
       ],
       "actions": [
-        "retry",
         "open"
       ]
     }
