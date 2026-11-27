@@ -32,9 +32,14 @@ TOP_LEVEL_KEYS = frozenset(
         "checksum_algo",
         "ffmpeg_path",
         "resolve_path",
+        "agent_policy",
     }
 )
 ORGANIZE_KEYS = frozenset({"template", "on_conflict", "mode"})
+#: How much of an agent's work Ferry starts without a person saying so. Mirrors the engine's
+#: ``[agent_policy]``; the plugin reads it because Park's clearance is requested at submit
+#: time, before the engine is asked anything. 0 means every agent transfer waits.
+AGENT_POLICY_KEYS = frozenset({"auto_approve_max_bytes"})
 PROXY_KEYS = frozenset({"proxy_codec", "proxy_height", "proxy_backend"})
 PROXY_BACKENDS = ("auto", "avfoundation", "ffmpeg")
 CHECKSUM_ALGOS = ("xxhash", "sha256")
@@ -69,6 +74,8 @@ class Config:
     checksum_algo: str = "xxhash"
     ffmpeg_path: str | None = None
     resolve_path: str | None = None
+    #: Bytes an agent's transfer may carry before a human has to approve it (0: none).
+    auto_approve_max_bytes: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -80,6 +87,7 @@ class Config:
             "checksum_algo": self.checksum_algo,
             "ffmpeg_path": self.ffmpeg_path,
             "resolve_path": self.resolve_path,
+            "agent_policy": {"auto_approve_max_bytes": self.auto_approve_max_bytes},
         }
 
 
@@ -121,6 +129,20 @@ def from_dict(raw: dict, *, source: str = "ferry.toml") -> Config:
     if not isinstance(organize, dict):
         raise ConfigError(f"{source}: organize must be a table")
     _unknown(organize, ORGANIZE_KEYS, source, "organize.")
+
+    policy = data.pop("agent_policy", {}) or {}
+    if not isinstance(policy, dict):
+        raise ConfigError(f"{source}: agent_policy must be a table")
+    _unknown(policy, AGENT_POLICY_KEYS, source, "agent_policy.")
+    auto_approve_max_bytes = policy.get("auto_approve_max_bytes", 0)
+    if (
+        isinstance(auto_approve_max_bytes, bool)
+        or not isinstance(auto_approve_max_bytes, int)
+        or auto_approve_max_bytes < 0
+    ):
+        raise ConfigError(
+            f"{source}: agent_policy.auto_approve_max_bytes must be a whole number of bytes"
+        )
 
     proxy = data.pop("proxy", {}) or {}
     if not isinstance(proxy, dict):
@@ -170,6 +192,7 @@ def from_dict(raw: dict, *, source: str = "ferry.toml") -> Config:
         checksum_algo=checksum_algo,
         ffmpeg_path=_path_or_none(data.get("ffmpeg_path"), f"{source}: ffmpeg_path"),
         resolve_path=_path_or_none(data.get("resolve_path"), f"{source}: resolve_path"),
+        auto_approve_max_bytes=auto_approve_max_bytes,
     )
 
 
@@ -208,6 +231,7 @@ def _path_or_none(value: object, where: str) -> str | None:
 
 
 __all__ = [
+    "AGENT_POLICY_KEYS",
     "CHECKSUM_ALGOS",
     "DEFAULT_TEMPLATE",
     "TEMPLATE_FIELDS",

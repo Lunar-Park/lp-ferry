@@ -61,3 +61,67 @@ name = "resolve"
 handler = "park_plugins.ferry.jobs:resolve"
 needs = []
 egress = "none"
+
+# A Ferry transfer as a card Park can draw: the same JSON per state a Slate reply would draw,
+# served from this package (/plugins/ferry/cards/transfer.json). Approve/Decline decide the
+# Park clearance an agent's transfer waits on; the app opens Ferry for the rest.
+[[cards]]
+id = "transfer"
+resource = "park.job"
+match = { plugin = "ferry", name = "send" }
+template = "cards/transfer.json"
+
+[[cards.actions]]
+id = "approve"
+label = "Approve"
+tone = "ok"
+op = "machines.clearance.grant"
+
+[[cards.actions]]
+id = "decline"
+label = "Decline"
+tone = "bad"
+op = "machines.clearance.deny"
+
+[[cards.actions]]
+id = "retry"
+label = "Retry"
+op = "ferry.transfer.start"
+
+[[cards.actions]]
+id = "open"
+label = "Open in Ferry"
+app = true
+
+[[cards]]
+id = "copy"
+resource = "park.job"
+match = { plugin = "ferry", name = "copy" }
+template = "cards/transfer.json"
+
+[[cards.actions]]
+id = "approve"
+label = "Approve"
+tone = "ok"
+op = "machines.clearance.grant"
+
+[[cards.actions]]
+id = "decline"
+label = "Decline"
+tone = "bad"
+op = "machines.clearance.deny"
+
+[[cards.actions]]
+id = "retry"
+label = "Retry"
+op = "ferry.offload"
+
+[[cards.actions]]
+id = "open"
+label = "Open in Ferry"
+app = true
+
+# The command an agent drives, for the Agent-CLI contract check (scripts/check-plugins.py --cli).
+[cli]
+command = "ferry"
+json = true

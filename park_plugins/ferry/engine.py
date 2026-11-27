@@ -49,6 +49,20 @@ class EngineUnavailableError(EngineError):
     """No daemon is listening."""
 
 
+class AwaitingApprovalError(EngineError):
+    """The engine will not start this plan until a person approves it.
+
+    Not a failure: the plan is parked in ``awaiting_approval`` by the engine's agent policy,
+    and the job that asked turns it into a Park clearance (``ops._request_clearance``) rather
+    than ending as an error. The plan's own ``reasons`` say what the policy objected to.
+    """
+
+    def __init__(self, message: str, *, plan_id: str = "", reasons: list[str] | None = None):
+        super().__init__(message)
+        self.plan_id = plan_id
+        self.reasons = list(reasons or [])
+
+
 def socket_path() -> str:
     return os.environ.get("FERRY_SOCKET") or str(Path.home() / ".ferry" / "ferry.sock")
 
@@ -289,6 +303,14 @@ def run(
             )
             tid = started.get("transfer_id")
             if started.get("status") != "started":
+                if started.get("status") == "awaiting_approval":
+                    # The engine's agent policy parked the plan. A person has to say yes; the
+                    # job turns this into a clearance instead of a failure.
+                    raise AwaitingApprovalError(
+                        "the engine is waiting for a person to approve this plan",
+                        plan_id=plan_id,
+                        reasons=[str(reason) for reason in (started.get("reasons") or [])],
+                    )
                 raise EngineError(
                     f"the engine did not start the plan: {started.get('status')} {started.get('reason', '')}".strip()
                 )

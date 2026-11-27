@@ -1,0 +1,85 @@
+{
+  "states": {
+    "waiting_clearance": {
+      "type": "tree",
+      "title": "Waiting for a person",
+      "label": "What will move",
+      "nodes": [
+        {
+          "id": "source",
+          "label": "Source",
+          "note": "the folder on the machine that holds it"
+        },
+        {
+          "id": "destination",
+          "label": "Destination",
+          "note": "where the files land, verified"
+        },
+        {
+          "id": "receipt",
+          "label": "Receipt",
+          "note": "every file hashed as it lands"
+        }
+      ],
+      "edges": [
+        [
+          "source",
+          "destination"
+        ],
+        [
+          "destination",
+          "receipt"
+        ]
+      ],
+      "focus": "source",
+      "actions": [
+        "approve",
+        "decline"
+      ]
+    },
+    "running": {
+      "type": "progress",
+      "title": "Copying",
+      "label": "Verified bytes",
+      "done": "bytes_verified",
+      "total": "bytes_total",
+      "unit": "bytes",
+      "note": "current_file",
+      "rate": "rate",
+      "eta": "eta_s",
+      "actions": [
+        "open"
+      ]
+    },
+    "done": {
+      "type": "receipt",
+      "title": "Landed and verified",
+      "files": "files",
+      "bytes": "bytes",
+      "algorithm": "checksum_algo",
+      "verified": "verified",
+      "state": "verified",
+      "actions": [
+        "open"
+      ]
+    },
+    "failed": {
+      "type": "status",
+      "title": "Did not finish",
+      "items": [
+        {
+          "label": "What went wrong",
+          "value": "error"
+        },
+        {
+          "label": "File in flight",
+          "value": "current_file"
+        }
+      ],
+      "actions": [
+        "retry",
+        "open"
+      ]
+    }
+  }
+}

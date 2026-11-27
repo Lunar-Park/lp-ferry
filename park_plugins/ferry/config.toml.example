@@ -41,3 +41,10 @@ on_conflict = "skip"
 # folder intact) or moves them.
 # Options: copy (default) | move
 mode = "copy"
+
+[agent_policy]
+# How much an agent's transfer may carry before a person has to approve it, in bytes.
+# 0 (the default) means every transfer an agent starts waits for a Park clearance;
+# raise it to let small sends through on their own. Park's clearance pauses the queued
+# job until someone decides, so nothing moves in the meantime.
+auto_approve_max_bytes = 0

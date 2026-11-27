@@ -60,6 +60,7 @@ ferry.send job -> engine plan.create with the source on the source machine's eng
 | `ferry.send` | write | Pair the two machines' engines if needed, and queue the `ferry.send` job on the destination machine |
 | `ferry.send.plan` | write | Called by the send job: record the engine's plan and attach it to the transfer |
 | `ferry.send.fail` | write | Called by the send job when it cannot reach a plan |
+| `ferry.clearance` | write | Ask Park for a human decision about a transfer (a no-op on a hub without clearances) |
 | `ferry.transfer.get` / `.list` / `.start` / `.progress` | read / write | Transfer rows and progress |
 | `ferry.receipt.record` / `.get` / `.list` / `.file` | write / read | Receipts, and filing verified media into a project |
 | `ferry.verify` | external | Re-verify a transfer's receipt with the engine's physical readback; `folder` also reports files the receipt never mentioned |
@@ -79,6 +80,23 @@ Receipts recorded before the engine have no engine receipt. `ferry.verify` re-ha
 | `proxy` | job (`ffmpeg`) | Encode a ProRes proxy per item and register each one |
 | `resolve` | job | Write the project manifest and, when Resolve's scripting module is installed, create the project |
 
+## Cards and clearances
+
+`plugin.toml` declares two `[[cards]]` (a transfer and a copy) pointing at
+`cards/transfer.json`, so Park draws a Ferry job as a tree while it waits, a progress bar
+while it copies, a receipt when it lands and a status when it fails. Park's contract check
+(`cards` rule) reads the same file: one visual per state from Park's vocabulary, and every
+action a state offers declared on the card.
+
+A transfer an **agent** starts waits for a person. `ferry.offload`/`ferry.send` queue the job
+and then ask Park for a clearance (`machines.clearance.request`), which pauses the queued job
+(`waiting_clearance`) so no node picks it up; granting it puts the job back in the queue.
+Whether an agent's transfer needs this is `[agent_policy] auto_approve_max_bytes` in this
+plugin's config (0, the default, waits for every agent transfer). A plan the **engine** parks
+in `awaiting_approval` while the job is already running becomes a clearance too, recorded
+against the transfer (a running job cannot be paused, and the record says `paused: false`).
+Both halves go through `ferry.clearance`, which skips itself on a Park older than clearances.
+
 ## Configuration
 
 The plugin's own file is `~/.ferry/config.toml` (or `./ferry.toml`, or an explicit `config_path`); see [`park_plugins/ferry/config.toml.example`](../park_plugins/ferry/config.toml.example). Unknown keys are refused.
@@ -89,6 +107,8 @@ The plugin's own file is `~/.ferry/config.toml` (or `./ferry.toml`, or an explic
   - `rename` keeps both, as `name (2).ext`.
   - `overwrite` is refused: Ferry never overwrites.
 - **`checksum_algo`:** accepted so an existing config loads. Copies are verified with SHA-256, the hash Park's Assets are keyed by.
+- **`[agent_policy] auto_approve_max_bytes`:** how much an agent's transfer may carry before a
+  person has to approve it; `0` (the default) means every agent transfer waits for a clearance.
 
 The engine has its own, separate `~/.ferry/ferry.toml` (roots, P2P port, agent policy).
 

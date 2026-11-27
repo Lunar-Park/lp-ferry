@@ -210,6 +210,50 @@ def _finish(
     }
 
 
+def _awaiting_clearance(job: JobContext, plan: dict, transfer: str, exc, errors: list[str]) -> dict:
+    """Record a plan the engine parked as a clearance, and answer with what is waiting.
+
+    The job is already running, so Park cannot pause it (it pauses a *queued* job, which is
+    what ``ferry.offload``/``ferry.send`` ask for when an agent starts one). The request is
+    still made: it is the record that a person has to decide, and the card shows it. A hub
+    without clearances answers ``requested: false`` and nothing changes.
+    """
+    from park.ops import ParkError
+    from park.sdk.node import NodeError
+
+    reason = "; ".join(exc.reasons) or str(exc)
+    clearance = None
+    try:
+        answer = job.call(
+            "ferry.clearance",
+            {
+                "transfer": transfer,
+                "op": f"ferry.{job.name}",
+                "reason": f"the engine parked '{plan.get('id')}': {reason}",
+                "preview": {
+                    "plan": plan.get("id"),
+                    "fingerprint": plan.get("fingerprint"),
+                    "destination": plan.get("destination") or plan.get("destinations"),
+                    "bytes": plan.get("bytes"),
+                    "reasons": exc.reasons,
+                },
+            },
+        )
+        clearance = answer.get("clearance") if isinstance(answer, dict) else None
+    except (NodeError, ParkError) as park_exc:
+        errors.append(f"Park did not record the clearance: {park_exc}")
+        job.log(errors[-1])
+    job.log(f"plan {plan.get('id')} is waiting for a person: {reason}")
+    return {
+        "transfer": transfer,
+        "plan": plan.get("id"),
+        "status": "waiting_clearance",
+        "reasons": exc.reasons,
+        "clearance": clearance,
+        **({"errors": errors} if errors else {}),
+    }
+
+
 class _ProgressReporter:
     """Relays the engine's progress into Park, throttled, with the detail a live view reads.
 
@@ -353,6 +397,11 @@ def _execute(
         state = engine.run(
             plan["id"], plan["fingerprint"], on_progress=on_progress, cancelled=job.cancelled
         )
+    except engine.AwaitingApprovalError as exc:
+        # The engine's agent policy parked the plan. That is a person's decision to make, not
+        # a failure: ask Park for a clearance and end with the plan's state, so the queue says
+        # "waiting for a person" rather than "failed".
+        return _awaiting_clearance(job, plan, transfer, exc, errors)
     except engine.EngineError as exc:
         errors.append(_engine_error(exc))
     except (OSError, ValueError) as exc:

@@ -138,6 +138,64 @@ def _submit(ctx: OpContext, job: str, params: dict, machine: str | None) -> tupl
     return job_id, bool(job_id)
 
 
+def _request_clearance(
+    ctx: OpContext,
+    *,
+    op: str,
+    transfer: str,
+    reason: str,
+    preview: dict | None = None,
+    job: str | None = None,
+) -> dict | None:
+    """Ask Park for a human decision about a transfer, when this Park has clearances.
+
+    Clearances arrived with Park's Phase 1, so this is optional end to end: an older hub has
+    no ``machines.clearance.request`` and the transfer is queued or reported exactly as it
+    was before. ``job`` links the clearance to the job it pauses, which Park only does for a
+    *queued* job; a job that is already running cannot be paused, so the clearance is
+    recorded against the transfer alone and the caller says so.
+    """
+    try:
+        resolve_op("machines.clearance.request")
+    except NotFound:
+        return None
+    body = {
+        "op": op,
+        "reason": reason,
+        # `paused` says whether Park stopped the job behind this decision. A person reading
+        # the card can tell "nothing is moving" from "it is still running".
+        "preview": {"transfer": transfer, "paused": False, **(preview or {})},
+    }
+    if job:
+        try:
+            return ctx.call(
+                "machines.clearance.request",
+                {**body, "job": job, "preview": {**body["preview"], "job": job, "paused": True}},
+            )
+        except (Conflict, Forbidden, NotFound):
+            # The job is running, or another actor's: record the decision without pausing it.
+            pass
+    try:
+        return ctx.call("machines.clearance.request", body)
+    except (Conflict, Forbidden, NotFound, Invalid):
+        return None
+
+
+def _agent(actor: str) -> bool:
+    return str(actor or "").startswith("agent:")
+
+
+def _needs_clearance(ctx: OpContext, actor: str, size: int) -> bool:
+    """Whether an agent's transfer has to wait for a person before it is queued."""
+    if not _agent(actor):
+        return False
+    try:
+        limit = _config(None).auto_approve_max_bytes
+    except Invalid:
+        limit = 0
+    return size > limit
+
+
 def _file_rows(files: list[dict] | None) -> list[dict]:
     out: list[dict] = []
     for item in files or []:
@@ -590,6 +648,18 @@ def ferry_offload(
     if owner and not queued:
         raise Unavailable("Park did not accept the copy job")
     total = row["files"] if owner else row["copies"]
+    clearance = None
+    if queued and _needs_clearance(ctx, ctx.actor, int(row["bytes"] or 0)):
+        # An agent's copy over the auto-approve limit waits for a person: Park pauses the
+        # queued job, so no node picks it up until the clearance is granted.
+        clearance = _request_clearance(
+            ctx,
+            op="ferry.offload",
+            transfer=transfer,
+            reason=f"{ctx.actor} asked to copy {row['bytes']} bytes; over the auto-approve limit",
+            preview={"plan": plan, "machine": machine, "files": total, "bytes": row["bytes"]},
+            job=job_id,
+        )
     ctx.write(
         "ferry.transfer.queued",
         {
@@ -599,6 +669,7 @@ def ferry_offload(
             "machine": machine,
             "total": total,
             "queued": _now(),
+            "clearance": (clearance or {}).get("id"),
         },
     )
     return {
@@ -609,6 +680,7 @@ def ferry_offload(
         "queued": queued,
         "files": total,
         "bytes": row["bytes"],
+        **({"clearance": clearance["id"]} if clearance else {}),
     }
 
 
@@ -673,6 +745,18 @@ def ferry_send(
     )
     if not queued:
         raise Unavailable("Park did not accept the send job")
+    clearance = None
+    if _needs_clearance(ctx, ctx.actor, 0):
+        # A send's size is only known once its plan exists, so an agent's send waits for a
+        # person before a node is asked to plan it at all.
+        clearance = _request_clearance(
+            ctx,
+            op="ferry.send",
+            transfer=transfer,
+            reason=f"{ctx.actor} asked to send {root} to {landing['name']}",
+            preview={"source": root, "destination": target, "machine": landing["id"]},
+            job=job_id,
+        )
     ctx.write(
         "ferry.transfer.queued",
         {
@@ -682,6 +766,7 @@ def ferry_send(
             "machine": landing["id"],
             "total": 0,
             "queued": _now(),
+            "clearance": (clearance or {}).get("id"),
         },
     )
     return {
@@ -690,6 +775,7 @@ def ferry_send(
         "source_machine": origin["id"],
         "destination_machine": landing["id"],
         "queued": True,
+        **({"clearance": clearance["id"]} if clearance else {}),
     }
 
 
@@ -777,6 +863,30 @@ def ferry_send_fail(
         },
     )
     return {"transfer": transfer}
+
+
+@_op(
+    "ferry.clearance",
+    summary="Ask Park for a human decision about a transfer that needs one.",
+    effect="write",
+    returns="{requested, clearance}",
+)
+def ferry_clearance(
+    ctx: OpContext,
+    transfer: str,
+    reason: str,
+    op: Annotated[str, "Operation being cleared"] = "ferry.send",
+    preview: Annotated[dict | None, "What the reviewer should see"] = None,
+) -> dict:
+    """The stable way a job asks for a clearance, wherever it runs.
+
+    A job runs on a node and reaches Park through ``job.call``, so it calls *this* op (which
+    every Ferry knows) rather than ``machines.clearance.request`` (which a hub older than
+    Phase 1 does not have). When Park has no clearances this answers ``requested: false`` and
+    the transfer is reported exactly as before.
+    """
+    clearance = _request_clearance(ctx, op=op, transfer=transfer, reason=reason, preview=preview)
+    return {"requested": clearance is not None, "clearance": (clearance or {}).get("id")}
 
 
 @_op("ferry.transfer.get", summary="One transfer with its progress.")
@@ -1240,6 +1350,7 @@ def ferry_resolve_project(
 
 
 __all__ = [
+    "ferry_clearance",
     "ferry_ingest_list",
     "ferry_offload",
     "ferry_plan",
