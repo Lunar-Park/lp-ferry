@@ -1,77 +1,60 @@
-"""A copy is only verified if the bytes are on the media before anything calls it verified.
+"""Copy durability is the engine's now: fsync the bytes, fsync the entry, then hash.
 
-The hash in a receipt is taken after the write, and a write is not durable just because the
-call returned: the bytes can still be in the page cache. These tests pin the ordering —
-flush the file, flush the directory entry, then hash and record.
+These assertions used to live here, against ``park_plugins/ferry/copy.py`` — the Python copy
+lane that staged a file, flushed it, flushed the directory entry and only then hashed it into
+a receipt (``db51c56``, "make verified mean out of the page cache, not just passed"). That
+module was removed in ``fb5ae37`` when the plugin became a thin adapter over the ferry engine
+(Go v2), so this file could not even be collected: it imported a module that no longer exists.
+
+The ordering it pinned did not go away; it moved, and it is tested where it now lives:
+
+    internal/storage/publish.go   Reserve fsyncs the staged bytes, Publish fsyncs the
+                                  directory entry after the link/rename — the two flushes
+                                  these tests counted.
+    internal/storage/readback_*.go  the readback that fills a receipt reads through
+                                  f_nocache (darwin) / fadvise_dontneed (linux), so the hash
+                                  is of the media and not of the page cache.
+    internal/storage/storage_test.go  TestReadbackMode, TestT1_2_PublishNeverClobbers,
+                                  TestT1_4_BindingChangeDetected.
+    internal/engine/engine_test.go    a whole copy end to end: fan-out, verification,
+                                  mtimes, and the receipt that comes out of it.
+    tests/park_plugin/test_offload.py  the plugin's side: a receipt is only recorded for
+                                  files the engine verified and Park registered by hash.
+
+Run ``go test ./internal/storage/... ./internal/engine/...`` for the guarantee itself. This
+file stays as the pointer, so the next reader of the deleted module's tests finds them.
 """
 
 from __future__ import annotations
 
-import errno
-import os
+import subprocess
+from pathlib import Path
 
 import pytest
-from park_plugins.ferry import copy as copy_module
-from park_plugins.ferry.copy import copy_verified, fsync_dir, fsync_file, hash_file
+
+REPO = Path(__file__).resolve().parents[1]
 
 
-@pytest.fixture
-def flushes(monkeypatch):
-    """Record every fsync of the copy lane, without touching the real device."""
-    seen: list[int] = []
-    real = os.fsync
-
-    def record(fd):
-        seen.append(fd)
-        return real(fd)
-
-    monkeypatch.setattr(copy_module.os, "fsync", record)
-    return seen
-
-
-def test_flushing_a_file_waits_for_the_device(tmp_path, flushes):
-    target = tmp_path / "clip.mov"
-    target.write_bytes(b"landed" * 100)
-
-    fsync_file(target)
-
-    assert len(flushes) == 1
-    assert target.read_bytes() == b"landed" * 100
+def test_the_copy_lane_is_the_engine_and_its_durability_tests_are_there():
+    """The code that used to be tested here is in Go, and so are its tests."""
+    assert not (REPO / "park_plugins" / "ferry" / "copy.py").exists(), (
+        "the Python copy lane was retired with the Go engine (fb5ae37)"
+    )
+    for path in (
+        "internal/storage/publish.go",
+        "internal/storage/storage_test.go",
+        "internal/engine/engine_test.go",
+    ):
+        assert (REPO / path).is_file(), path
 
 
-def test_flushing_a_file_that_is_not_there_raises(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        fsync_file(tmp_path / "missing.mov")
-
-
-def test_a_directory_that_cannot_be_opened_is_not_an_error(tmp_path, monkeypatch):
-    def refuse(path, flags):
-        raise OSError(errno.EACCES, "no directory for you")
-
-    monkeypatch.setattr(copy_module.os, "open", refuse)
-
-    fsync_dir(tmp_path)  # must not raise
-
-
-def test_a_directory_that_refuses_its_flush_is_not_an_error(tmp_path, monkeypatch):
-    def refuse(fd):
-        raise OSError(errno.EINVAL, "not that kind of file")
-
-    monkeypatch.setattr(copy_module.os, "fsync", refuse)
-
-    fsync_dir(tmp_path)  # must not raise
-
-
-def test_publishing_a_copy_flushes_the_bytes_and_the_directory_entry(tmp_path, flushes):
-    source = tmp_path / "source.mov"
-    source.write_bytes(b"frame" * 1000)
-    dest = tmp_path / "out" / "dest.mov"
-    dest.parent.mkdir()
-
-    digest, size = copy_verified(source, dest)
-
-    assert dest.read_bytes() == source.read_bytes()
-    assert digest == hash_file(source) and size == source.stat().st_size
-    # one flush for the staged bytes (inside copy_verified), one for the directory entry
-    # that publishes them — that second one is what these tests exist for.
-    assert len(flushes) >= 2
+@pytest.mark.skipif(not (REPO / "go.mod").is_file(), reason="not a Go checkout")
+def test_storage_and_engine_durability_suites_pass():
+    done = subprocess.run(
+        ["go", "test", "./internal/storage/...", "./internal/engine/..."],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
